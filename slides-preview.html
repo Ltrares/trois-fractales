@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slide Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: Georgia, serif;
+            padding: 40px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-weight: 400;
+            font-size: 24px;
+            color: #888;
+        }
+        .slides-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        .slide-wrapper {
+            background: #222;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .slide-label {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 8px;
+            font-family: 'Courier New', monospace;
+        }
+        .slide-meta {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 12px;
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            padding: 8px 10px;
+            border-radius: 4px;
+        }
+        .slide-meta span {
+            margin-right: 16px;
+        }
+        canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Slide Preview</h1>
+    <div class="slides-container" id="container"></div>
+
+    <script type="module">
+        // Import slides from the shared source file
+        import { slides, SLIDE_WIDTH, SLIDE_HEIGHT } from './src/textures/slides-texture.js';
+
+        // Create canvases and contexts
+        const container = document.getElementById('container');
+        const canvases = [];
+        const contexts = [];
+
+        for (let i = 0; i < slides.length; i++) {
+            const slide = slides[i];
+            const wrapper = document.createElement('div');
+            wrapper.className = 'slide-wrapper';
+
+            const label = document.createElement('div');
+            label.className = 'slide-label';
+            label.textContent = `Slide ${i + 1} (${SLIDE_WIDTH}x${SLIDE_HEIGHT})`;
+
+            const meta = document.createElement('div');
+            meta.className = 'slide-meta';
+            meta.innerHTML = Object.entries(slide.meta)
+                .map(([k, v]) => `<span>${k}: ${v}</span>`)
+                .join('');
+
+            const canvas = document.createElement('canvas');
+            canvas.width = SLIDE_WIDTH;
+            canvas.height = SLIDE_HEIGHT;
+
+            wrapper.appendChild(label);
+            wrapper.appendChild(meta);
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            canvases.push(canvas);
+            contexts.push(canvas.getContext('2d'));
+        }
+
+        // Animation loop
+        function render(time) {
+            for (let i = 0; i < slides.length; i++) {
+                slides[i].render(contexts[i], canvases[i], time);
+            }
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

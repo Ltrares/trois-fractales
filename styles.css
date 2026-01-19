@@ -1,0 +1,220 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+
+#overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    color: #fff; z-index: 100;
+}
+#overlay h1 { font-size: 18px; max-width: 600px; text-align: center; line-height: 1.6; margin-bottom: 40px; font-weight: normal; }
+#overlay button {
+    background: #fff; color: #000; border: none;
+    padding: 15px 40px; font-size: 16px; cursor: pointer;
+    font-family: inherit;
+}
+#overlay button:hover:not(:disabled) { background: #ddd; }
+#overlay button:disabled {
+    background: #444;
+    color: #888;
+    cursor: wait;
+}
+#overlay .hint { margin-top: 30px; color: #666; font-size: 12px; }
+#overlay .warning { margin-top: 40px; color: #a86; font-size: 11px; max-width: 400px; text-align: center; line-height: 1.5; }
+
+#stats {
+    position: fixed; top: 10px; right: 10px;
+    color: #0f0; font-size: 11px;
+    background: rgba(0,0,0,0.5); padding: 8px;
+}
+
+#pause-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 100;
+}
+#pause-overlay .pause-content {
+    text-align: center;
+    color: #fff;
+}
+#pause-overlay h2 {
+    font-size: 24px;
+    font-weight: normal;
+    margin-bottom: 30px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+}
+#pause-overlay .controls {
+    display: inline-block;
+    text-align: left;
+    margin-bottom: 30px;
+}
+#pause-overlay .control-row {
+    margin: 8px 0;
+    font-size: 14px;
+    color: #aaa;
+}
+#pause-overlay .key {
+    display: inline-block;
+    min-width: 70px;
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+    padding: 4px 10px;
+    margin-right: 12px;
+    border-radius: 3px;
+    font-size: 12px;
+    text-align: center;
+}
+#pause-overlay .resume-hint {
+    color: #666;
+    font-size: 12px;
+}
+
+/* Screenshot overlay */
+#screenshot-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 100;
+    overflow: auto;
+}
+#screenshot-overlay .screenshot-content {
+    text-align: center;
+    color: #fff;
+    padding: 40px;
+    max-width: 1200px;
+    width: 100%;
+}
+#screenshot-overlay h2 {
+    font-size: 24px;
+    font-weight: normal;
+    margin-bottom: 30px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+}
+#screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+#screenshot-grid:empty::after {
+    content: 'Aucune capture. Appuyez sur T pour capturer.';
+    color: #666;
+    grid-column: 1 / -1;
+    padding: 60px;
+}
+.screenshot-item {
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+}
+.screenshot-item:hover {
+    transform: scale(1.02);
+    background: rgba(255,255,255,0.1);
+}
+.screenshot-item img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    display: block;
+}
+.screenshot-item .meta {
+    padding: 10px;
+    font-size: 10px;
+    color: #888;
+    text-align: left;
+    white-space: pre-line;
+    line-height: 1.4;
+}
+.screenshot-item .delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: #f66;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.screenshot-item:hover .delete-btn {
+    opacity: 1;
+}
+.screenshot-item .delete-btn:hover {
+    background: #f66;
+    color: #fff;
+}
+#screenshot-overlay .screenshot-hint {
+    color: #666;
+    font-size: 12px;
+}
+
+/* Screenshot flash feedback */
+.screenshot-flash {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    pointer-events: none;
+    z-index: 200;
+    animation: flash 0.3s ease-out forwards;
+}
+@keyframes flash {
+    0% { opacity: 0.5; }
+    100% { opacity: 0; }
+}
+
+/* Screenshot preview modal */
+#screenshot-preview {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.95);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 150;
+    cursor: pointer;
+}
+#screenshot-preview img {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+}
+
+/* Scan debug panel */
+#scan-debug {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.8);
+    color: #0f0;
+    font-size: 11px;
+    padding: 10px;
+    border: 1px solid #333;
+    min-width: 280px;
+    z-index: 50;
+}
+#scan-debug .debug-title {
+    color: #ff0;
+    font-weight: bold;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 4px;
+}
+#scan-debug .hit { color: #0f0; }
+#scan-debug .fog { color: #f80; }
+#scan-debug .miss { color: #888; }
+#scan-debug .degenerate { color: #f00; font-weight: bold; }
+#scan-debug .ok { color: #0f0; }
+
+.hidden { display: none !important; }

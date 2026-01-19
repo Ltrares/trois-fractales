@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Ray Marching Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 40px;
+            background: #0a0a0a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: sans-serif;
+            color: #fff;
+        }
+        h1 {
+            margin-bottom: 20px;
+            font-weight: 300;
+        }
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        .description {
+            max-width: 500px;
+            color: #888;
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Why Ray Marching?</h1>
+    <div id="container"></div>
+    <p class="description">
+        To find where a ray hits a surface, we could check every pixel (slow but accurate).
+        Ray marching is faster: at each point, ask "how far is the nearest surface?" then jump that far.
+        Fewer checks, but we might skip over thin surfaces if our distance estimate is wrong.
+    </p>
+
+    <script type="module">
+        import { createStandaloneDemo } from './src/ui/ray-marching-diagram.js';
+
+        const container = document.getElementById('container');
+        const diagram = createStandaloneDemo(container);
+    </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Trois Fractales</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="overlay">
+        <h1>Trois Fractales</h1>
+        <button id="startBtn" disabled>Calcul des ombres...</button>
+        <div class="hint">WASD déplacer | Souris regarder | Z zoom | C s'accroupir | R aléatoire | ESC quitter</div>
+        <div class="warning">⚠️ Avertissement : ce contenu peut provoquer des crises chez les personnes épileptiques photosensibles.</div>
+    </div>
+
+    <div id="pause-overlay" class="hidden">
+        <div class="pause-content">
+            <h2>Pause</h2>
+            <div class="controls">
+                <div class="control-row"><span class="key">WASD</span> Déplacer</div>
+                <div class="control-row"><span class="key">Souris</span> Regarder</div>
+                <div class="control-row"><span class="key">Z</span> Zoom (maintenir)</div>
+                <div class="control-row"><span class="key">C</span> S'accroupir (maintenir)</div>
+                <div class="control-row"><span class="key">R</span> Fractales aléatoires</div>
+                <div class="control-row"><span class="key">T</span> Capture d'écran</div>
+                <div class="control-row"><span class="key">G</span> Galerie</div>
+            </div>
+            <div class="resume-hint">ESPACE ou cliquer pour reprendre</div>
+        </div>
+    </div>
+
+    <div id="screenshot-overlay" class="hidden">
+        <div class="screenshot-content">
+            <h2>Captures d'écran</h2>
+            <div id="screenshot-grid"></div>
+            <div class="screenshot-hint">Cliquer pour agrandir | Suppr pour effacer | ESC pour fermer</div>
+        </div>
+    </div>
+
+    <div id="stats" class="hidden">--</div>
+
+    <!-- Scan debug panel (disabled)
+    <div id="scan-debug">
+        <div class="debug-title">Scan Debug</div>
+        <div id="scan-results">--</div>
+    </div>
+    -->
+
+    <canvas id="canvas"></canvas>
+
+    <script>console.log('[init] inline script running');</script>
+    <script type="module">
+        console.log('[init] module script starting...');
+
+        // Load modules one by one to find the culprit
+        async function loadModules() {
+            console.log('[init] loading fractal-des...');
+            await import('./src/shaders/fractals/fractal-des.js');
+            console.log('[init] loading fractal-config...');
+            await import('./src/fractals/fractal-config.js');
+            console.log('[init] loading fractal-animation...');
+            await import('./src/fractals/fractal-animation.js');
+            console.log('[init] loading main...');
+            await import('./src/main.js');
+            console.log('[init] all modules loaded');
+        }
+
+        loadModules().catch(err => {
+            console.error('[init] module load failed:', err);
+        });
+    </script>
+</body>
+</html>
