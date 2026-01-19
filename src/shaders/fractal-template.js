@@ -117,8 +117,7 @@ void main() {
 
     if (boxHit.x < 0.0 || boxHit.x >= galleryDepth) {
         // Ray doesn't hit bbox, or bbox is behind gallery surface
-        fragColor = texture(u_galleryColor, screenUV);
-        return;
+        discard;
     }
 
     // Ray march the fractal, starting from bbox entry
@@ -143,10 +142,8 @@ void main() {
     }
 
     if (!hit) {
-        vec4 gallery = texture(u_galleryColor, screenUV);
         {{FOG_MISS}}
-        fragColor = gallery;
-        return;
+        discard;
     }
 
     // Shade the fractal
@@ -272,17 +269,23 @@ export const mandelboxShaderSrc = buildFractalShader(
         float fogAmount = float(stepsTaken) / float(MAX_STEPS);
         fogAmount = smoothstep(0.7, 1.0, fogAmount);
 
-        // Cheap spotlight interaction - brighten fog in light cone
-        vec3 fogPos = ro + rd * t;
-        vec3 spotPos = DISPLAY_POS + vec3(${toGLSL(mbx.spotlightOffset)});
-        vec3 spotAim = normalize(DISPLAY_POS - spotPos);
-        vec3 toFog = normalize(fogPos - spotPos);
-        float spotCone = pow(max(dot(toFog, spotAim), 0.0), 6.0);
-        float spotDist = length(fogPos - spotPos);
-        float spotLight = spotCone / (1.0 + spotDist * 0.1);
+        // Only render fog if there's significant fog to show
+        if (fogAmount > 0.01) {
+            // Cheap spotlight interaction - brighten fog in light cone
+            vec3 fogPos = ro + rd * t;
+            vec3 spotPos = DISPLAY_POS + vec3(${toGLSL(mbx.spotlightOffset)});
+            vec3 spotAim = normalize(DISPLAY_POS - spotPos);
+            vec3 toFog = normalize(fogPos - spotPos);
+            float spotCone = pow(max(dot(toFog, spotAim), 0.0), 6.0);
+            float spotDist = length(fogPos - spotPos);
+            float spotLight = spotCone / (1.0 + spotDist * 0.1);
 
-        vec3 fogColor = vec3(0.21, 0.22, 0.23) + vec3(0.2, 0.19, 0.21) * spotLight;
-        gallery.rgb = mix(gallery.rgb, fogColor, fogAmount * 0.65);`
+            vec3 fogColor = vec3(0.21, 0.22, 0.23) + vec3(0.2, 0.19, 0.21) * spotLight;
+            vec4 gallery = texture(u_galleryColor, screenUV);
+            gallery.rgb = mix(gallery.rgb, fogColor, fogAmount * 0.65);
+            fragColor = gallery;
+            return;
+        }`
     }
 );
 
