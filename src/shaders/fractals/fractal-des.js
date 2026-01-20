@@ -22,12 +22,6 @@ void sphereFold(inout vec3 z, inout float dz, float minR2, float fixedR2) {
     }
 }`;
 
-export const qsquareHelper = `
-vec4 qsquare(vec4 q) {
-    float a = q.x, b = q.y, c = q.z, d = q.w;
-    return vec4(a*a - b*b - c*c - d*d, 2.0*a*b, 2.0*a*c, 2.0*a*d);
-}`;
-
 export const qmulHelper = `
 vec4 qmul(vec4 p, vec4 q) {
     return vec4(
@@ -128,9 +122,13 @@ float ${fnName}(vec3 pos) {
  * Mandelbulb DE template
  * @param {string} fnName - function name ('mandelbulbDE' or 'fractalDE')
  * @param {number} iterations - iteration count (12 for both shadow and visual)
+ * @param {boolean} forShadow - shadow mode: no iteration tracking
  */
-function makeMandelbulbDE({ fnName = 'mandelbulbDE', iterations = 12 }) {
-    return `
+function makeMandelbulbDE({ fnName = 'mandelbulbDE', iterations = 12, forShadow = false }) {
+    const normStr = (iterations / 2).toFixed(1);
+    return `${forShadow ? '' : `
+float g_bulbIter = 0.0;
+`}
 float ${fnName}(vec3 pos) {
     vec3 z = pos;
     vec3 c = z;
@@ -140,9 +138,10 @@ float ${fnName}(vec3 pos) {
     float np = u_mandelbulbPhiPower;
     float phase = u_mandelbulbPhase;
     float phiPhase = u_mandelbulbPhiPhase;
-
+${forShadow ? '' : `    int escapeIter = ${iterations};
+`}
     for (int i = 0; i < ${iterations}; i++) {
-        if (r > 2.0) break;
+        if (r > 2.0) {${forShadow ? '' : ` escapeIter = i;`} break; }
 
         float theta = atan(z.y, z.x) + phase;
         float phi = asin(z.z / r) + phiPhase;
@@ -156,6 +155,8 @@ float ${fnName}(vec3 pos) {
         z += c;
         r = length(z);
     }
+${forShadow ? '' : `    g_bulbIter = (float(escapeIter) + 1.0 - log2(max(log2(r), 0.001))) / ${normStr};
+`}
     return 0.5 * log(r) * r / dr;
 }`;
 }
@@ -182,7 +183,7 @@ ${forShadow ? `
     bool escaped = false;
     for (int i = 0; i < ${iterations}; i++) {
         dq = qmul(2.0 * q, dq);
-        q = qsquare(q) + c;
+        q = qmul(q, q) + c;
         q2 = dot(q, q);
         if (q2 > ${escapeStr}) { escaped = true; break; }
     }
@@ -217,12 +218,12 @@ ${forShadow ? `
 
 // Named DEs for gallery shader (all three coexist)
 export const mandelboxDEFn = makeMandelboxDE({ fnName: 'mandelboxDE', iterations: 10, earlyBreak: true });
-export const mandelbulbDEFn = makeMandelbulbDE({ fnName: 'mandelbulbDE', iterations: 12 });
+export const mandelbulbDEFn = makeMandelbulbDE({ fnName: 'mandelbulbDE', iterations: 16, forShadow: true });
 export const juliaDEFn = makeJuliaDE({ fnName: 'juliaDE', iterations: 20, escapeThreshold: 4.0, forShadow: true });
 
 // Visual DEs (for code display - uses visual quality settings)
 export const mandelboxVisualDEFn = makeMandelboxDE({ fnName: 'mandelboxDE', iterations: 12, earlyBreak: false });
-export const mandelbulbVisualDEFn = makeMandelbulbDE({ fnName: 'mandelbulbDE', iterations: 12 });
+export const mandelbulbVisualDEFn = makeMandelbulbDE({ fnName: 'mandelbulbDE', iterations: 16 });
 export const juliaVisualDEFn = makeJuliaDE({ fnName: 'juliaDE', iterations: 100, escapeThreshold: 16.0, forShadow: false });
 
 // ============ COMBINED EXPORTS ============
@@ -230,7 +231,6 @@ export const juliaVisualDEFn = makeJuliaDE({ fnName: 'juliaDE', iterations: 100,
 // All helpers needed for shadow casting
 export const allHelpers = `${boxFoldHelper}
 ${sphereFoldHelper}
-${qsquareHelper}
 ${qmulHelper}`;
 
 // All DEs for gallery shadow casting (uses shadow-optimized versions)
@@ -247,7 +247,7 @@ ${sphereFoldHelper}
 ${makeMandelboxDE({ fnName: 'fractalDE', iterations: 12, earlyBreak: false })}`;
 
 export const mandelbulbForTemplate = `${mandelbulbUniforms}
-${makeMandelbulbDE({ fnName: 'fractalDE', iterations: 12 })}`;
+${makeMandelbulbDE({ fnName: 'fractalDE', iterations: 16, forShadow: false })}`;
 
 export const juliaForTemplate = `${juliaUniforms}
 ${qmulHelper}

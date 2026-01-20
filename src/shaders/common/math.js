@@ -38,11 +38,6 @@ mat3 juliaRot3D(vec3 angles) {
     );
 }
 
-vec4 qsquare(vec4 q) {
-    float a = q.x, b = q.y, c = q.z, d = q.w;
-    return vec4(a*a - b*b - c*c - d*d, 2.0*a*b, 2.0*a*c, 2.0*a*d);
-}
-
 vec4 qmul(vec4 p, vec4 q) {
     return vec4(
         p.x*q.x - p.y*q.y - p.z*q.z - p.w*q.w,

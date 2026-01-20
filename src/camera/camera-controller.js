@@ -16,6 +16,7 @@ export class CameraController {
         this.isPaused = false;
         this.hasEnteredGallery = false;
         this.screenshotManager = null;
+        this.statsElement = null;
         this.onResume = null;  // Callback when resuming from pause
 
         this._boundMouseMove = this._handleMouseMove.bind(this);
@@ -27,6 +28,10 @@ export class CameraController {
 
     setScreenshotManager(manager) {
         this.screenshotManager = manager;
+    }
+
+    setStatsElement(element) {
+        this.statsElement = element;
     }
 
     init(startBtn, sculptureAnimators) {
@@ -151,6 +156,11 @@ export class CameraController {
                 this._pause();
                 this.screenshotManager.show();
             }
+        }
+
+        // Toggle stats display
+        if (e.code === 'KeyQ' && this.statsElement) {
+            this.statsElement.classList.toggle('hidden');
         }
     }
 

@@ -195,6 +195,7 @@ let stagnationSnapshot = null;
 
 const cameraController = new CameraController(camera, canvas, overlay, pauseOverlay);
 cameraController.setScreenshotManager(screenshotManager);
+cameraController.setStatsElement(statsEl);
 cameraController.init(startBtn, sculptureAnimators);
 
 // Restart render loop when unpausing

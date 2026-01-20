@@ -54,6 +54,7 @@ float sceneDE(vec3 p) {
     vec3 fp = (p - DISPLAY_POS) / FRACTAL_SCALE;
     float fd = fractalDE(fp) * FRACTAL_SCALE;
     float clip = sdBox(p - DISPLAY_POS, BBOX_SIZE);
+    {{CLIP_MODIFIER}}
     return max(fd, clip);
 }
 
@@ -125,12 +126,13 @@ void main() {
     float tMax = min(boxHit.y, galleryDepth);
     bool hit = false;
     int stepsTaken = 0;
+    float d = 0.0;
     {{RAY_MARCH_INIT}}
 
     for (int i = 0; i < MAX_STEPS; i++) {
         stepsTaken = i;
         vec3 p = ro + rd * t;
-        float d = sceneDE(p);
+        d = sceneDE(p);
         {{RAY_MARCH_BOUNDARY_CHECK}}
         if (d < MIN_DIST) {
             {{RAY_MARCH_HIT_CHECK}}
@@ -140,6 +142,9 @@ void main() {
         t += d;
         if (t > tMax) break;
     }
+
+    // Near-miss check: if we got close but exhausted steps, treat as hit
+    {{NEAR_MISS_CHECK}}
 
     if (!hit) {
         {{FOG_MISS}}
@@ -237,7 +242,9 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         .replace('{{RAY_MARCH_HIT_CHECK}}', opts.hitCheck || '')
         .replace('{{FRACTAL_DISCARD}}', opts.discardCheck || '')
         .replace('{{FOG_BLEND}}', opts.fogBlend || '')
-        .replace('{{FOG_MISS}}', opts.fogMiss || '');
+        .replace('{{FOG_MISS}}', opts.fogMiss || '')
+        .replace('{{CLIP_MODIFIER}}', opts.clipModifier || '')
+        .replace('{{NEAR_MISS_CHECK}}', opts.nearMissCheck || '');
 }
 
 // Pre-built fractal shader sources
@@ -295,12 +302,18 @@ export const mandelbulbShaderSrc = buildFractalShader(
     toGLSL(mbl.position),
     toGLSL(mbl.bboxHalf),
     mbl.scale.toFixed(1),
-    'mix(vec3(0.08, 0.22, 0.06), vec3(0.28, 0.48, 0.18), iterProxy) + 0.05 * cos(pos * 10.0 + vec3(0.3, 0.0, 0.6))',
+    'mix(vec3(0.02, 0.1, 0.02), vec3(0.3, 0.7, 0.2), 0.5 + 0.5 * cos(6.28 * g_bulbIter))',
     toGLSL(mbl.spotlightOffset),
     '1.0',   // specMult
     '32.0',  // specExp
     '32',    // more shadow steps for mandelbulb
-    { skipSelfShadowskipAO: false }
+    {
+        skipSelfShadow: false,
+        skipAO: false,
+        nearMissCheck: `if (!hit && d < 0.02) {
+        hit = true;  // Close enough - treat as surface hit
+    }`
+    }
 );
 
 const jul = FRACTALS.julia;
