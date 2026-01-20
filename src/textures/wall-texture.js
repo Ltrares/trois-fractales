@@ -59,9 +59,9 @@ export function createWallTexture(gl) {
             y: 670
         },
         {
-            title: 'JULIA QUATERNION',
+            title: 'JULIA TRANCHE',
             subtitle: 'Galerie Est',
-            desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes faits de fractales.",
+            desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes faits de fractales 2D.",
             x: 1250,
             y: 300
         }

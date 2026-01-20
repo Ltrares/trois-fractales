@@ -77,9 +77,9 @@ canvas { display: block; }
 #screenshot-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.9);
-    display: flex; justify-content: center; align-items: center;
+    display: flex; justify-content: flex-start; align-items: flex-start;
     z-index: 100;
-    overflow: auto;
+    overflow-y: auto;
 }
 #screenshot-overlay .screenshot-content {
     text-align: center;
@@ -87,6 +87,28 @@ canvas { display: block; }
     padding: 40px;
     max-width: 1200px;
     width: 100%;
+    margin: 0 auto;
+}
+#screenshot-overlay .storage-info {
+    color: #888;
+    font-size: 11px;
+    margin-bottom: 20px;
+}
+#screenshot-overlay .storage-bar {
+    display: inline-block;
+    width: 150px;
+    height: 8px;
+    background: #333;
+    border-radius: 4px;
+    margin-left: 10px;
+    vertical-align: middle;
+    overflow: hidden;
+}
+#screenshot-overlay .storage-bar-fill {
+    height: 100%;
+    background: #4a4;
+    border-radius: 4px;
+    transition: width 0.3s;
 }
 #screenshot-overlay h2 {
     font-size: 24px;

@@ -136,9 +136,54 @@ export class ScreenshotManager {
         }
     }
 
+    _getStorageInfo() {
+        let used = 0;
+        let count = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(STORAGE_PREFIX)) {
+                const item = localStorage.getItem(key);
+                if (item) {
+                    used += item.length * 2; // UTF-16 = 2 bytes per char
+                    count++;
+                }
+            }
+        }
+        // localStorage quota is typically 5-10MB, assume 5MB
+        const quota = 5 * 1024 * 1024;
+        return { used, quota, count };
+    }
+
+    _formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    _renderStorageInfo() {
+        // Remove existing storage info
+        const existing = this.overlay.querySelector('.storage-info');
+        if (existing) existing.remove();
+
+        const { used, quota, count } = this._getStorageInfo();
+        const pct = Math.min(100, (used / quota) * 100);
+
+        const info = document.createElement('div');
+        info.className = 'storage-info';
+        info.innerHTML = `${count} capture${count !== 1 ? 's' : ''} · ${this._formatBytes(used)} / ${this._formatBytes(quota)} ` +
+            `<span class="storage-bar"><span class="storage-bar-fill" style="width: ${pct}%"></span></span>`;
+
+        // Insert after the h2
+        const h2 = this.overlay.querySelector('h2');
+        if (h2 && h2.nextSibling) {
+            h2.parentNode.insertBefore(info, h2.nextSibling);
+        }
+    }
+
     _renderGrid() {
         const entries = this._loadFromStorage();
         this.grid.innerHTML = '';
+        this._renderStorageInfo();
 
         for (const entry of entries) {
             const item = document.createElement('div');
