@@ -18,4 +18,12 @@ export const CROUCH_HEIGHT = 0.7;
 export const CROUCH_SPEED = 8.0;
 
 // Rendering settings
-export const RENDER_QUALITY = 1.0   ;
+// Quality can be set via URL param: ?q=0.5 (mobile), ?q=1 (default), ?q=2 (high)
+function getQuality() {
+    const params = new URLSearchParams(window.location.search);
+    const q = parseFloat(params.get('q'));
+    if (!isNaN(q) && q > 0 && q <= 4) return q;
+    // Default: lower for mobile, higher for desktop
+    return window.innerWidth <= 768 ? 0.5 : 1.0;
+}
+export const RENDER_QUALITY = getQuality();
