@@ -80,7 +80,7 @@ export class CameraController {
         this.isLocked = true;  // Fake "locked" state for mobile
         this.isPaused = false;
         this.hasEnteredGallery = true;
-        this.autoWalk = true;  // Auto-walk on mobile
+        this.autoWalk = false;  // Only walk while touching
         if (this.overlay) this.overlay.classList.add('hidden');
         if (this.onPointerLockChange) this.onPointerLockChange(true);
     }
@@ -91,13 +91,7 @@ export class CameraController {
         const touch = e.touches[0];
         this.touchStartX = touch.clientX;
         this.touchStartY = touch.clientY;
-
-        // Double-tap to toggle auto-walk
-        const now = Date.now();
-        if (this.lastTap && now - this.lastTap < 300) {
-            this.autoWalk = !this.autoWalk;
-        }
-        this.lastTap = now;
+        this.autoWalk = true;  // Walk while touching
     }
 
     _handleTouchMove(e) {
@@ -107,17 +101,17 @@ export class CameraController {
         const dx = touch.clientX - this.touchStartX;
         const dy = touch.clientY - this.touchStartY;
 
-        // Drag to look around
-        this.camera.yaw += dx * MOUSE_SENS * 0.5;
-        this.camera.pitch -= dy * MOUSE_SENS * 0.5;
+        // Drag to look around (inverted to feel natural)
+        this.camera.yaw -= dx * MOUSE_SENS * 0.5;
+        this.camera.pitch += dy * MOUSE_SENS * 0.5;
         this.camera.pitch = Math.max(-1.5, Math.min(1.5, this.camera.pitch));
 
         this.touchStartX = touch.clientX;
         this.touchStartY = touch.clientY;
     }
 
-    _handleTouchEnd(e) {
-        // Could add tap-to-stop or other gestures here
+    _handleTouchEnd() {
+        this.autoWalk = false;  // Stop walking when not touching
     }
 
     _handlePauseClick() {
