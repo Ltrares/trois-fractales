@@ -19,11 +19,20 @@ export class CameraController {
         this.statsElement = null;
         this.onResume = null;  // Callback when resuming from pause
 
+        // Mobile/touch support
+        this.isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || !('pointerLockElement' in document);
+        this.touchStartX = 0;
+        this.touchStartY = 0;
+        this.autoWalk = false;
+
         this._boundMouseMove = this._handleMouseMove.bind(this);
         this._boundKeyDown = this._handleKeyDown.bind(this);
         this._boundKeyUp = this._handleKeyUp.bind(this);
         this._boundPointerLockChange = this._handlePointerLockChange.bind(this);
         this._boundPauseClick = this._handlePauseClick.bind(this);
+        this._boundTouchStart = this._handleTouchStart.bind(this);
+        this._boundTouchMove = this._handleTouchMove.bind(this);
+        this._boundTouchEnd = this._handleTouchEnd.bind(this);
     }
 
     setScreenshotManager(manager) {
@@ -38,10 +47,16 @@ export class CameraController {
         this.sculptureAnimators = sculptureAnimators;
 
         startBtn.addEventListener('click', () => {
-            console.log('[click] Entrez clicked, requesting pointer lock...');
-            this.canvas.requestPointerLock().catch((err) => {
-                console.error('[click] Pointer lock failed:', err);
-            });
+            if (this.isMobile) {
+                // Mobile: skip pointer lock, just enter
+                console.log('[click] Mobile mode - entering without pointer lock');
+                this._enterMobile();
+            } else {
+                console.log('[click] Entrez clicked, requesting pointer lock...');
+                this.canvas.requestPointerLock().catch((err) => {
+                    console.error('[click] Pointer lock failed:', err);
+                });
+            }
         });
 
         if (this.pauseOverlay) {
@@ -52,6 +67,57 @@ export class CameraController {
         document.addEventListener('mousemove', this._boundMouseMove);
         document.addEventListener('keydown', this._boundKeyDown);
         document.addEventListener('keyup', this._boundKeyUp);
+
+        // Touch controls for mobile
+        if (this.isMobile) {
+            this.canvas.addEventListener('touchstart', this._boundTouchStart, { passive: false });
+            this.canvas.addEventListener('touchmove', this._boundTouchMove, { passive: false });
+            this.canvas.addEventListener('touchend', this._boundTouchEnd, { passive: false });
+        }
+    }
+
+    _enterMobile() {
+        this.isLocked = true;  // Fake "locked" state for mobile
+        this.isPaused = false;
+        this.hasEnteredGallery = true;
+        this.autoWalk = true;  // Auto-walk on mobile
+        if (this.overlay) this.overlay.classList.add('hidden');
+        if (this.onPointerLockChange) this.onPointerLockChange(true);
+    }
+
+    _handleTouchStart(e) {
+        if (!this.isLocked) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        this.touchStartX = touch.clientX;
+        this.touchStartY = touch.clientY;
+
+        // Double-tap to toggle auto-walk
+        const now = Date.now();
+        if (this.lastTap && now - this.lastTap < 300) {
+            this.autoWalk = !this.autoWalk;
+        }
+        this.lastTap = now;
+    }
+
+    _handleTouchMove(e) {
+        if (!this.isLocked) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const dx = touch.clientX - this.touchStartX;
+        const dy = touch.clientY - this.touchStartY;
+
+        // Drag to look around
+        this.camera.yaw += dx * MOUSE_SENS * 0.5;
+        this.camera.pitch -= dy * MOUSE_SENS * 0.5;
+        this.camera.pitch = Math.max(-1.5, Math.min(1.5, this.camera.pitch));
+
+        this.touchStartX = touch.clientX;
+        this.touchStartY = touch.clientY;
+    }
+
+    _handleTouchEnd(e) {
+        // Could add tap-to-stop or other gestures here
     }
 
     _handlePauseClick() {
@@ -187,6 +253,9 @@ export class CameraController {
         const right = this.camera.getRight();
 
         let vx = 0, vz = 0;
+
+        // Auto-walk on mobile
+        if (this.autoWalk) { vx += forward[0]; vz += forward[2]; }
 
         if (this.keys['KeyW']) { vx += forward[0]; vz += forward[2]; }
         if (this.keys['KeyS']) { vx -= forward[0]; vz -= forward[2]; }
