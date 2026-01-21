@@ -102,7 +102,7 @@ export class CameraController {
         const dy = touch.clientY - this.touchStartY;
 
         // Drag to look around (inverted to feel natural)
-        this.camera.yaw -= dx * MOUSE_SENS * 1.5;
+        this.camera.yaw -= dx * MOUSE_SENS * 2.5;
         this.camera.pitch += dy * MOUSE_SENS * 1.5;
         this.camera.pitch = Math.max(-1.5, Math.min(1.5, this.camera.pitch));
 
