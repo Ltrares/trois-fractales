@@ -155,6 +155,28 @@ canvas { display: block; }
     white-space: pre-line;
     line-height: 1.4;
 }
+.screenshot-item .download-btn {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: #6cf;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.screenshot-item:hover .download-btn {
+    opacity: 1;
+}
+.screenshot-item .download-btn:hover {
+    background: #6cf;
+    color: #000;
+}
 .screenshot-item .delete-btn {
     position: absolute;
     top: 8px;

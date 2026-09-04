@@ -220,6 +220,15 @@ export class ScreenshotManager {
             }
             meta.textContent = metaText;
 
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'download-btn';
+            downloadBtn.textContent = '\u2193';
+            downloadBtn.title = 'Télécharger';
+            downloadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._handleDownload(entry);
+            });
+
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'delete-btn';
             deleteBtn.textContent = '×';
@@ -230,6 +239,7 @@ export class ScreenshotManager {
 
             item.appendChild(img);
             item.appendChild(meta);
+            item.appendChild(downloadBtn);
             item.appendChild(deleteBtn);
 
             item.addEventListener('click', () => {
@@ -239,6 +249,20 @@ export class ScreenshotManager {
 
             this.grid.appendChild(item);
         }
+    }
+
+    _handleDownload(entry) {
+        const d = new Date(entry.timestamp);
+        const pad = (n) => String(n).padStart(2, '0');
+        const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+            `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+
+        const link = document.createElement('a');
+        link.href = entry.imageData;
+        link.download = `trois-fractales-${stamp}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     }
 
     _handleDelete(id) {

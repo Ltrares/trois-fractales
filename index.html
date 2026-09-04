@@ -39,7 +39,7 @@
         <div class="screenshot-content">
             <h2>Captures d'écran</h2>
             <div id="screenshot-grid"></div>
-            <div class="screenshot-hint">Cliquer pour agrandir | Suppr pour effacer | ESC pour fermer</div>
+            <div class="screenshot-hint">Cliquer pour agrandir | ↓ pour télécharger | Suppr pour effacer | ESC pour fermer</div>
         </div>
     </div>
 
@@ -60,15 +60,15 @@
 
         // Load modules one by one to find the culprit
         async function loadModules() {
-            console.log('[init] loading fractal-des...');
+            //console.log('[init] loading fractal-des...');
             await import('./src/shaders/fractals/fractal-des.js');
-            console.log('[init] loading fractal-config...');
+            //console.log('[init] loading fractal-config...');
             await import('./src/fractals/fractal-config.js');
-            console.log('[init] loading fractal-animation...');
+            //console.log('[init] loading fractal-animation...');
             await import('./src/fractals/fractal-animation.js');
-            console.log('[init] loading main...');
+            //console.log('[init] loading main...');
             await import('./src/main.js');
-            console.log('[init] all modules loaded');
+            //console.log('[init] all modules loaded');
         }
 
         loadModules().catch(err => {

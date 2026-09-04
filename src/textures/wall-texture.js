@@ -61,7 +61,7 @@ export function createWallTexture(gl) {
         {
             title: 'JULIA TRANCHE',
             subtitle: 'Galerie Est',
-            desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes faits de fractales 2D.",
+            desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes. Chaque tranche de tube évoque une fractale julia 2D.",
             x: 1250,
             y: 300
         }
@@ -110,7 +110,7 @@ export function createWallTexture(gl) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#000000';
     ctx.font = '24px Georgia, serif';
-    const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont des frontières dans l'espace mathématique. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
+    const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont des frontières dans cet espace mathématique. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
     const generalLines = wrapText(ctx, generalDesc, 1200);
     let generalY = 1140;
 
