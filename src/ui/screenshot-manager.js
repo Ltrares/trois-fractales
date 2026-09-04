@@ -1,5 +1,7 @@
 // Screenshot capture and gallery management
 
+import { showToast, hideToast } from './toast.js';
+
 const STORAGE_PREFIX = 'fractal-screenshot-';
 
 export class ScreenshotManager {
@@ -42,8 +44,9 @@ export class ScreenshotManager {
         // Save to localStorage
         this._saveToStorage(entry);
 
-        // Visual feedback - white flash
+        // Visual feedback - white flash + gallery hint
         this._showFlash();
+        this._showHint();
     }
 
     _deepClone(obj) {
@@ -61,6 +64,14 @@ export class ScreenshotManager {
         flash.className = 'screenshot-flash';
         document.body.appendChild(flash);
         flash.addEventListener('animationend', () => flash.remove());
+    }
+
+    _showHint() {
+        showToast('Appuyez sur <kbd>G</kbd> pour ouvrir la galerie');
+    }
+
+    _hideHint() {
+        hideToast();
     }
 
     _saveToStorage(entry) {
@@ -105,6 +116,7 @@ export class ScreenshotManager {
 
     show() {
         this.visible = true;
+        this._hideHint();
         this._renderGrid();
         this.overlay.classList.remove('hidden');
         document.addEventListener('keydown', this._boundKeyDown);

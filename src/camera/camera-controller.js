@@ -2,6 +2,10 @@
 
 import { MOVE_SPEED, RUN_MULTIPLIER, MOUSE_SENS, STAND_HEIGHT, CROUCH_HEIGHT, CROUCH_SPEED } from '../utils/constants.js';
 import { isValidPosition } from './collision.js';
+import { showToast } from '../ui/toast.js';
+
+const CURSOR_HINT = 'Appuyez sur <kbd>\u00c9CHAP</kbd> pour lib\u00e9rer le curseur';
+const CURSOR_HINT_MS = 6000;
 
 export class CameraController {
     constructor(camera, canvas, overlay, pauseOverlay, onPointerLockChange) {
@@ -25,6 +29,15 @@ export class CameraController {
         this.touchStartY = 0;
         this.autoWalk = false;
 
+        // "Where's my cursor?" detection. Visitors unfamiliar with pointer
+        // lock shake the mouse to find the pointer, so a burst of hard
+        // direction reversals means they want the cursor back, not a view.
+        this._shakeDir = 0;          // sign of the last significant movement
+        this._shakeTimes = [];       // timestamps of recent direction reversals
+        this._cursorHintScheduled = false;   // timed hint armed once per session
+        this._cursorHintTimed = false;       // timed hint has fired
+        this._lastShakeHint = 0;             // last shake-triggered hint (ms)
+
         this._boundMouseMove = this._handleMouseMove.bind(this);
         this._boundKeyDown = this._handleKeyDown.bind(this);
         this._boundKeyUp = this._handleKeyUp.bind(this);
@@ -47,6 +60,7 @@ export class CameraController {
         this.sculptureAnimators = sculptureAnimators;
 
         startBtn.addEventListener('click', () => {
+            this._scheduleCursorHint();
             if (this.isMobile) {
                 // Mobile: skip pointer lock, just enter
                 console.log('[click] Mobile mode - entering without pointer lock');
@@ -170,7 +184,54 @@ export class CameraController {
         }
     }
 
+    _scheduleCursorHint() {
+        // Teach the cursor-release key once, shortly after the visitor first
+        // enters, so most of them never reach the shaking stage. Mouse
+        // capture doesn't apply on touch devices.
+        if (this.isMobile || this._cursorHintScheduled) return;
+        this._cursorHintScheduled = true;
+
+        this._cursorHintTimer = setTimeout(() => {
+            this._cursorHintTimed = true;
+            showToast(CURSOR_HINT, CURSOR_HINT_MS);
+        }, 4000);
+    }
+
+    _detectShake(movementX) {
+        const SPEED_FLOOR = 8;       // px/event; ignores jitter and slow pans
+        const WINDOW_MS = 1000;
+        const REVERSALS = 4;
+        const COOLDOWN_MS = 10000;   // don't re-nag while a hint is still up
+
+        if (!this.hasEnteredGallery) return;
+        if (Math.abs(movementX) < SPEED_FLOOR) return;
+
+        const dir = Math.sign(movementX);
+        const now = performance.now();
+
+        if (this._shakeDir !== 0 && dir !== this._shakeDir) {
+            // Sliding window: keep only the reversals from the last second, so
+            // a sustained shake accumulates instead of resetting part-way.
+            this._shakeTimes.push(now);
+            while (this._shakeTimes.length && now - this._shakeTimes[0] > WINDOW_MS) {
+                this._shakeTimes.shift();
+            }
+
+            if (this._shakeTimes.length >= REVERSALS &&
+                now - this._lastShakeHint > COOLDOWN_MS) {
+                this._lastShakeHint = now;
+                this._shakeTimes.length = 0;
+                showToast(CURSOR_HINT, CURSOR_HINT_MS);
+            }
+        }
+        this._shakeDir = dir;
+    }
+
     _handleMouseMove(e) {
+        // Runs before the lock guard: someone hunting for a lost cursor may
+        // already have lost lock, and those events still signal the struggle.
+        this._detectShake(e.movementX);
+
         if (!this.isLocked) return;
         this.camera.yaw += e.movementX * MOUSE_SENS;
         this.camera.pitch -= e.movementY * MOUSE_SENS;
@@ -284,6 +345,7 @@ export class CameraController {
     }
 
     dispose() {
+        clearTimeout(this._cursorHintTimer);
         document.removeEventListener('pointerlockchange', this._boundPointerLockChange);
         document.removeEventListener('mousemove', this._boundMouseMove);
         document.removeEventListener('keydown', this._boundKeyDown);

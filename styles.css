@@ -218,6 +218,42 @@ canvas { display: block; }
     100% { opacity: 0; }
 }
 
+/* Transient hint toasts (capture, cursor release) */
+.toast {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    font-size: 15px;
+    padding: 10px 18px;
+    border-radius: 6px;
+    border: 1px solid rgba(102,204,255,0.4);
+    pointer-events: none;
+    z-index: 150;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+.toast.fading {
+    transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.toast kbd {
+    display: inline-block;
+    background: rgba(102,204,255,0.15);
+    border: 1px solid rgba(102,204,255,0.5);
+    border-radius: 3px;
+    padding: 1px 7px;
+    margin: 0 2px;
+    color: #6cf;
+    font-family: inherit;
+    font-weight: bold;
+}
+
 /* Screenshot preview modal */
 #screenshot-preview {
     position: fixed;
