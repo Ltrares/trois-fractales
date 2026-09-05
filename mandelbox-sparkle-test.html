@@ -61,10 +61,14 @@
     <span class="val" id="foldV">1.00</span></label>
   <div class="sep"></div>
 
-  <button id="taa" class="on">TAA: on</button>
+  <button id="accum" class="on">accum: on</button>
   <button id="diag">diag: off</button>
-  <label>blend <input type="range" id="blend" min="0.05" max="1" step="0.01" value="0.12">
-    <span class="val" id="blendV">0.12</span></label>
+  <label title="ghost tail while the camera moves, in milliseconds">tail ms
+    <input type="range" id="movems" min="30" max="600" step="10" value="150">
+    <span class="val" id="movemsV">150</span></label>
+  <label title="samples the mean stops at when parked; higher = stiller, slower to recover">rest n
+    <input type="range" id="restcap" min="16" max="1024" step="16" value="128">
+    <span class="val" id="restcapV">128</span></label>
   <label title="sub-pixel jitter radius in pixels; 0 = sample pixel centre only">jitter
     <input type="range" id="jit" min="0" max="0.5" step="0.01" value="0.5">
     <span class="val" id="jitV">0.50</span></label>
@@ -84,9 +88,14 @@
   view-dependent sparkle while standing still.<br>
   Timing: draw order alternates each frame; figure is the median of up to 240 samples
   with ±half the 10–90 spread. Stats reset when a control changes.
-Pane B is TAA: Halton-jittered rays, history reprojected by world position, 3x3
-  neighbourhood clamp. <b>blend</b> is the fraction of the new frame taken each
-  frame (0.12 = keep 88% history). TAA off makes B identical to A.
+Pane B is progressive accumulation (time-based multisampling), NOT TAA: Halton-jittered sub-pixel samples
+  averaged in place as a true 1/n running mean. No reprojection, no history
+  rejection, no neighbourhood clamp -- none of that exists in this file.
+  It converges only while the camera is parked, and the accumulator is discarded
+  on any camera change, so while moving B is a plain single-sample image.
+  Convergence is exact but SLOW by construction: at 1/n the newest frame is worth
+  0.17% by frame 600, so the last of the settling takes minutes. That is the
+  mean working correctly, not a stall. <b>accum</b> off makes B identical to A.
   <b>SS</b> now applies to both panes, so cone tracing can be judged with or without it.
 </div>
 <div id="err"></div>
@@ -115,19 +124,20 @@ const VARIANTS = {
     opts: { ...BASE },
   },
   B: {
-    // TAA: jittered rays + reprojected history + neighbourhood clamp.
+    // Progressive accumulation: jittered sub-pixel samples, 1/n running mean.
+    // No reprojection and no neighbourhood clamp -- neither is implemented here.
     // Jitter is applied on the CPU as a sub-pixel camera offset (u_jitter),
     // history is reprojected by world-position, and the clamp rejects history
     // that falls outside the current 3x3 colour range -- the piece the old
     // implementation lacked, which is why it smeared.
-    name: 'TAA  (jitter + reproject + clamp)',
-    // alpha carries ray distance t, so the TAA pass can reconstruct the world
+    name: 'accumulate  (sub-pixel jitter, 1/n mean)',
+    // alpha carries ray distance t, so a future reprojection could reconstruct the world
     // position of each hit without a second render target.
     // alphaOut: hits carry ray distance t. alphaMiss: fog/miss pixels carry a
     // negative sentinel so the resolve rejects them instead of reconstructing
     // a world position from a t that never corresponded to a surface.
     opts: { ...BASE, alphaOut: 't', alphaMiss: '-1.0' },
-    taa: true,
+    accum: true,
   },
 };
 
@@ -204,9 +214,9 @@ function makePane(canvasId, variant) {
   const texDepth = mkTex([255, 255, 255, 255]);   // 1.0 * 100 = far
 
   const pane = { cv, gl, prog, locs, texColor, texDepth, name: variant.name,
-                 supersample: !!variant.supersample, taa: !!variant.taa };
+                 supersample: !!variant.supersample, accum: !!variant.accum };
 
-  if (pane.taa) {
+  if (pane.accum) {
     // Two history buffers, ping-ponged. Float targets so repeated blending
     // does not quantise.
     const ext = gl.getExtension('EXT_color_buffer_float');
@@ -229,7 +239,7 @@ function makePane(canvasId, variant) {
     // Scene target: full float so the ray distance in alpha survives intact.
     pane.sceneFmt = ext ? gl.RGBA32F : gl.RGBA8;
     pane.sceneType = ext ? gl.FLOAT : gl.UNSIGNED_BYTE;
-    console.log('[TAA] EXT_color_buffer_float:', !!ext,
+    console.log('[accum] EXT_color_buffer_float:', !!ext,
                 '| OES_texture_float_linear:', !!extLin,
                 '| history:', ext ? 'RGBA16F' : 'RGBA8 (8-bit feedback -> quantisation)',
                 '| scene:', ext ? 'RGBA32F (exact t)' : 'RGBA8 (t quantised -> reprojection WILL drift)');
@@ -248,7 +258,7 @@ function makePane(canvasId, variant) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     pane.fboScene = gl.createFramebuffer();
     pane.fboHist = gl.createFramebuffer();
-    pane.taaW = pane.taaH = 0;
+    pane.accumW = pane.accumH = 0;
     pane.histIdx = 0;
     pane.reset = true;
     pane.checked = false;
@@ -273,7 +283,7 @@ function makePane(canvasId, variant) {
     // Camera motion is handled by the age reset in the JS: when the basis
     // changes there is no valid correspondence for a fragment-space
     // accumulator, so history is restarted rather than warped.
-    const taaFrag = `#version 300 es
+    const accumFrag = `#version 300 es
 precision highp float;
 uniform sampler2D u_cur;      // this frame, jittered (alpha = ray distance t)
 uniform sampler2D u_hist;     // accumulated history
@@ -304,13 +314,13 @@ void main() {
     fragColor = vec4(mix(hist, cur, u_wAge), t);
 }`;
     const tp = gl.createProgram();
-    gl.attachShader(tp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'taa-vert'));
-    gl.attachShader(tp, compile(gl, gl.FRAGMENT_SHADER, taaFrag, 'taa'));
+    gl.attachShader(tp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'accum-vert'));
+    gl.attachShader(tp, compile(gl, gl.FRAGMENT_SHADER, accumFrag, 'accum'));
     gl.linkProgram(tp);
     if (!gl.getProgramParameter(tp, gl.LINK_STATUS))
       throw new Error(gl.getProgramInfoLog(tp));
-    pane.taaProg = tp;
-    pane.taaLocs = {
+    pane.accumProg = tp;
+    pane.accumLocs = {
       cur: gl.getUniformLocation(tp, 'u_cur'), hist: gl.getUniformLocation(tp, 'u_hist'),
       res: gl.getUniformLocation(tp, 'u_res'),
       reset: gl.getUniformLocation(tp, 'u_reset'),
@@ -409,12 +419,28 @@ void main() {
 const target = mbx.position.slice();
 const cam = { dist: 7, orbit: 0.6, height: 0.4 };
 let WOBBLE = false, SHOW_NORMALS = false, RES = 1, SS = 1;
-let TAA_ON = true, TAA_BLEND = 0.12, TAA_JIT = 0.5, TAA_DIAG = false, taaFrame = 0;
+let ACCUM_ON = true, ACCUM_JIT = 0.5, ACCUM_DIAG = false, accumFrame = 0;
+// Accumulation window. REST_CAP is the sample count the mean stops at when
+// parked (measured: converged well before 128 on this scene). MOVE_MS is how
+// long the ghost tail lasts while moving, in milliseconds -- 100-300ms is the
+// useful range. MOVE_FULL is the camera speed at which the short cap is fully
+// applied; CAP_RISE is the per-frame fraction of the way back up once stopped.
+let REST_CAP = 128, MOVE_MS = 150, MOVE_FULL = 0.02, CAP_RISE = 0.08;
 
-// Halton(2,3) low-discrepancy sequence for sub-pixel jitter.
+// Halton(2,3) low-discrepancy sequence for sub-pixel jitter, evaluated per frame
+// rather than read from a fixed table.
+//
+// This previously cycled 16 precomputed offsets with `accumFrame % 16`. A repeat
+// that short cannot converge: the accumulator ends up holding a rotating SUBSET
+// of the sequence, a different subset each frame, and drifts between them
+// forever instead of settling. Signature: perfectly still with jitter at 0,
+// never settling with jitter on, no matter how many samples.
+//
+// Halton is infinite and keeps filling the gaps between existing samples, so
+// dropping the wrap removes the cycle while keeping the even coverage that makes
+// it converge faster than white noise.
 function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
-const JITTER = Array.from({ length: 16 }, (_, i) =>
-  [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
+const jitterAt = i => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5];
 
 // Reprojection uses the PREVIOUS frame's camera basis directly, inverting the
 // template's own ray construction:
@@ -424,7 +450,7 @@ const JITTER = Array.from({ length: 16 }, (_, i) =>
 // A standard perspective matrix does NOT match this (verified: >100px error).
 
 
-// The TAA jitter is NOT applied here. It is a sub-pixel SAMPLE offset passed to
+// The accumulation jitter is NOT applied here. It is a sub-pixel SAMPLE offset passed to
 // the shader as u_jitter, so there is exactly one camera basis per frame and
 // the reprojection inverts the same projection that produced the history.
 // A previous version also had a view-direction tilt in this function; it was
@@ -490,7 +516,7 @@ function draw(pane, basis, W, H) {
   const ss = pane.supersample ? SS : 1;
   const rW = W * ss, rH = H * ss;
 
-  if (pane.taa && TAA_ON) { drawTAA(pane, basis, W, H); return; }
+  if (pane.accum && ACCUM_ON) { drawAccum(pane, basis, W, H); return; }
 
   if (ss > 1) {
     if (pane.rtW !== rW || pane.rtH !== rH) {
@@ -531,10 +557,10 @@ function draw(pane, basis, W, H) {
 // Renders the scene jittered into an offscreen buffer, resolves against the
 // reprojected history, then shows the accumulated result.
 
-function drawTAA(pane, basis, W, H) {
+function drawAccum(pane, basis, W, H) {
   const { gl, prog, locs } = pane;
 
-  if (pane.taaW !== W || pane.taaH !== H) {
+  if (pane.accumW !== W || pane.accumH !== H) {
     // History is a colour accumulator -- half float is plenty.
     for (const t of pane.hist) {
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -550,13 +576,13 @@ function drawTAA(pane, basis, W, H) {
     gl.bindTexture(gl.TEXTURE_2D, pane.cur);
     gl.texImage2D(gl.TEXTURE_2D, 0, pane.sceneFmt, W, H, 0, gl.RGBA,
                   pane.sceneType, null);
-    pane.taaW = W; pane.taaH = H; pane.reset = true;
+    pane.accumW = W; pane.accumH = H; pane.reset = true;
     if (!pane.checked) {
       pane.checked = true;
       gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pane.hist[0], 0);
       const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      console.log('[TAA] history FBO status:',
+      console.log('[accum] history FBO status:',
         st === gl.FRAMEBUFFER_COMPLETE ? 'COMPLETE'
           : 'INCOMPLETE (0x' + st.toString(16) + ') -- history is NOT being written');
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -566,19 +592,19 @@ function drawTAA(pane, basis, W, H) {
   // 1. scene, rendered with a sub-pixel SAMPLE offset (u_jitter)
   //
   // The jitter is ALWAYS on. Averaging sub-pixel sample positions over time is
-  // the entire antialiasing mechanism of TAA -- it is what turns N temporal
+  // the entire antialiasing mechanism here -- it is what turns N temporal
   // samples into N spatial samples per pixel. A previous version disabled the
   // jitter whenever the camera was parked, on the theory that a converged
   // jittered average is a box filter and therefore softer than the pixel-centre
   // sample. That is true and irrelevant: with no jitter every frame samples the
   // identical point, so the accumulator converges to exactly the aliased
-  // single-sample image and TAA provably does nothing. Box-filtering the pixel
+  // single-sample image and accumulation provably does nothing. Box-filtering the pixel
   // is the POINT, not a defect; if it is too soft, that is what u_blend and the
   // jitter radius are for.
   //
   // One camera basis per frame, identical to the previous frame's when parked,
   // so the reprojection inverts the same projection that produced the history.
-  const [jxN, jyN] = JITTER[taaFrame % JITTER.length];
+  const [jxN, jyN] = jitterAt(accumFrame);
   const wj0 = WOBBLE ? wobbleJit[0] : 0, wj1 = WOBBLE ? wobbleJit[1] : 0;
   const ub = cameraBasis(wj0, wj1);
   // Jitter radius in pixels. At 0 every frame samples the pixel centre and the
@@ -586,7 +612,7 @@ function drawTAA(pane, basis, W, H) {
   // At 0.5 the samples cover the whole pixel, so the converged image is a box
   // filter over the pixel footprint: antialiased, but softer than A's single
   // centre sample on detail that was never aliased to begin with.
-  pane.jitter = [jxN * (TAA_JIT / 0.5), jyN * (TAA_JIT / 0.5)];
+  pane.jitter = [jxN * (ACCUM_JIT / 0.5), jyN * (ACCUM_JIT / 0.5)];
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboScene);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pane.cur, 0);
@@ -603,8 +629,8 @@ function drawTAA(pane, basis, W, H) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
   gl.viewport(0, 0, W, H);
-  gl.useProgram(pane.taaProg);
-  const L = pane.taaLocs;
+  gl.useProgram(pane.accumProg);
+  const L = pane.accumLocs;
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pane.cur);
   gl.uniform1i(L.cur, 0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src);
@@ -613,20 +639,66 @@ function drawTAA(pane, basis, W, H) {
   // No camera uniforms: the resolve fetches history at the same pixel, so it
   // needs neither basis nor jitter.
   //
-  // Without reprojection, history is only valid while the camera holds still:
-  // a fragment-space accumulator cannot follow a surface that moved to a
-  // different pixel. So the age restarts whenever the basis changes, and the
-  // accumulation rebuilds over the frames after the camera settles. Sharp and
-  // converged when parked, single-sample while actually moving.
-  const camKey = ub.p.join(',') + '|' + ub.d.join(',');
-  if (pane.camKey !== camKey) { pane.age = 0; pane.camKey = camKey; }
+  // No hard reset on camera movement. With the age capped, history decays on its
+  // own over ~AGE_CAP frames, so a camera move fades the stale image out instead
+  // of discarding it in one frame. Partial rather than total: while moving you
+  // get a short-tailed average (some ghosting) rather than a bare single sample,
+  // and when the camera stops it converges from what is already there.
+  //
+  // The old behaviour -- `if (camKey changed) age = 0` -- was needed only because
+  // an uncapped 1/n mean never forgets, so stale history would have persisted
+  // forever with nothing to clear it.
   pane.age = pane.reset ? 1 : (pane.age || 0) + 1;
 
   // TRUE running mean: 1/n, no floor. A floor made this an EMA with a window
   // shorter than the 16-frame Halton cycle, so it averaged half a repeating
   // pattern and oscillated with it forever instead of converging -- the orange
   // edge flicker, and why lowering blend made it dimmer but not different.
-  gl.uniform1f(L.wAge, 1.0 / pane.age);
+  // Cap the sample count: 1/min(n, AGE_CAP). Measured on this scene, per-frame
+  // change is already 6e-5 by age 128 -- well under one 8-bit display step
+  // (3.9e-3) -- so everything past that refines below what can be seen. Capping
+  // costs nothing visible at rest and makes the accumulator self-recovering:
+  // history clears over ~128 frames instead of never, so it rebuilds on its own
+  // after a camera move rather than depending on the hard reset.
+  //
+  // Cost: at the cap this is a moving average, so a small permanent wobble
+  // replaces exact convergence. At 1/128 that wobble is far below a display
+  // step. Raise the cap for a stiller image, lower it for faster recovery.
+  // Speed-dependent cap. Parked, the cap is high (REST_CAP) so the mean keeps
+  // integrating and the still image converges. While moving it falls to a short
+  // window set in MILLISECONDS -- history has to clear fast enough that the
+  // ghost tail is not objectionable, and that is a time, not a frame count, so
+  // it is derived from the measured frame interval rather than assuming 60fps.
+  //
+  // Speed is the per-frame change in eye position plus view direction; MOVE_FULL
+  // is the speed at which the cap reaches its shortest. The rotation term is
+  // weighted so a rotation sweeping about a screen width counts like a dolly of
+  // one unit -- that 3.0 is a guess, not a measurement, so if rotating and
+  // dollying want different settings, it is the thing to tune.
+  let speed = 0;
+  if (pane.prevP) {
+    let dp = 0, dd = 0;
+    for (let i = 0; i < 3; i++) {
+      dp += (ub.p[i] - pane.prevP[i]) ** 2;
+      dd += (ub.d[i] - pane.prevD[i]) ** 2;
+    }
+    speed = Math.sqrt(dp) + Math.sqrt(dd) * 3.0;
+  }
+  pane.prevP = ub.p.slice(); pane.prevD = ub.d.slice();
+
+  const now = performance.now();
+  const dt = pane.prevT ? Math.min(100, now - pane.prevT) : 16.7;
+  pane.prevT = now;
+  const moveCap = Math.max(2, MOVE_MS / dt);          // ms -> frames, at the real rate
+  const k = Math.min(1, speed / MOVE_FULL);
+  // Drop to the short cap immediately on movement, ease back up when it stops:
+  // an instant return would start converging from a buffer still full of ghost,
+  // so the climb back is what lets the tail wash out first.
+  const target = REST_CAP + (moveCap - REST_CAP) * k;
+  pane.cap = pane.cap === undefined ? REST_CAP
+           : (target < pane.cap ? target : pane.cap + (target - pane.cap) * CAP_RISE);
+
+  gl.uniform1f(L.wAge, 1.0 / Math.min(pane.age, pane.cap));
   gl.uniform1i(L.reset, pane.reset ? 1 : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   pane.reset = false;
@@ -641,16 +713,16 @@ function drawTAA(pane, basis, W, H) {
   // src is the history written this frame; prev is the one it was blended from.
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src);
   gl.uniform1i(pane.showLocs.prev, 1);
-  gl.uniform1i(pane.showLocs.diag, TAA_DIAG ? 1 : 0);
+  gl.uniform1i(pane.showLocs.diag, ACCUM_DIAG ? 1 : 0);
   gl.uniform2f(pane.showLocs.res, W, H);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   pane.histIdx ^= 1;
 
-  // __taaStability: with the camera parked, measure how much the DISPLAYED
+  // __accumStability: with the camera parked, measure how much the DISPLAYED
   // image actually changes frame to frame. This is the number that matters --
   // it is the shake, measured directly, rather than inferred from geometry.
-  if (window.__taaStability) {
+  if (window.__accumStability) {
     const N = 64;
     const cx = Math.floor(W / 2) - N / 2, cy = Math.floor(H / 2) - N / 2;
     const buf = new Float32Array(4 * N * N);
@@ -677,8 +749,46 @@ function drawTAA(pane, basis, W, H) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  if (window.__taaProbe) {
-    window.__taaProbe = false;
+  // __convProbe: how far the accumulator still is from its own final value, at
+  // frame counts where it SHOULD already be done. 16 well-placed sub-pixel
+  // samples is what 16x SSAA uses, so by frame ~16-32 this should be close to
+  // converged. If it is still moving a lot at 64+, the accumulator is not
+  // extracting the information its samples contain -- that is a bug, not a
+  // convergence rate.
+  //
+  // Run `__convProbe = 1` with the camera parked. Reports mean |change| over the
+  // whole centre tile since the previous checkpoint, so a converging accumulator
+  // shows a falling series and a stalled one flattens out.
+  if (window.__convProbe) {
+    const CK = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+    if (CK.includes(pane.age)) {
+      const N = 64;
+      const cx = Math.floor(W / 2) - N / 2, cy = Math.floor(H / 2) - N / 2;
+      const buf = new Float32Array(4 * N * N);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+      gl.readPixels(cx, cy, N, N, gl.RGBA, gl.FLOAT, buf);
+      if (pane._convPrev) {
+        let sum = 0, n = 0;
+        for (let i = 0; i < N * N; i++)
+          for (let c = 0; c < 3; c++) { sum += Math.abs(buf[i*4+c] - pane._convPrev[i*4+c]); n++; }
+        // Checkpoints double, so the gap between them doubles too. Report change
+        // PER FRAME, or the widening interval alone makes a converging series
+        // look like a diverging one -- which is exactly what the first version
+        // of this probe showed.
+        const gap = pane.age - pane._convAge;
+        console.log(`[conv] age ${String(pane.age).padStart(5)}  mean |change| total ${(sum/n).toExponential(3)}`,
+                    ` per frame ${(sum/n/gap).toExponential(3)}  (over ${gap} frames)`);
+      } else {
+        console.log(`[conv] age ${String(pane.age).padStart(5)}  (baseline)`);
+      }
+      pane._convPrev = buf; pane._convAge = pane.age;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+  }
+
+  if (window.__accumProbe) {
+    window.__accumProbe = false;
     const rd = (tex, label) => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
@@ -691,7 +801,7 @@ function drawTAA(pane, basis, W, H) {
       console.log('[probe]', label.padEnd(12), s4.join(' '));
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     };
-    console.log('--- TAA probe at frame', taaFrame, '| blend', TAA_BLEND, '| jitter', TAA_JIT);
+    console.log('--- accum probe at frame', accumFrame, '| jitter', ACCUM_JIT);
     rd(pane.cur, 'scene(cur)');
     rd(pane.hist[0], 'hist[0]');
     rd(pane.hist[1], 'hist[1]');
@@ -798,7 +908,7 @@ function frame() {
     const H = Math.max(2, Math.floor(W * 0.78));
 
     let jx = 0, jy = 0;
-    taaFrame++;
+    accumFrame++;
     if (WOBBLE) {
       // ~1/3 pixel of world-space movement at the current distance
       const perPixel = (2.0 * cam.dist) / H;
@@ -864,28 +974,32 @@ document.getElementById('normals').addEventListener('click', e => {
 {
   const el = document.getElementById('jit'), out = document.getElementById('jitV');
   const sync = () => {
-    TAA_JIT = parseFloat(el.value); out.textContent = TAA_JIT.toFixed(2);
+    ACCUM_JIT = parseFloat(el.value); out.textContent = ACCUM_JIT.toFixed(2);
     // Restart accumulation so the new radius is judged converged, not mid-fade.
     if (panes && panes.B) panes.B.reset = true;
   };
   el.addEventListener('input', () => { sync(); resetStats(); }); sync();
 }
-document.getElementById('taa').addEventListener('click', e => {
-  TAA_ON = !TAA_ON;
-  e.target.textContent = 'TAA: ' + (TAA_ON ? 'on' : 'off');
-  e.target.classList.toggle('on', TAA_ON);
+{
+  const mk = (id, set, fmt) => {
+    const el = document.getElementById(id), out = document.getElementById(id + 'V');
+    const sync = () => { const v = parseFloat(el.value); set(v); out.textContent = fmt(v); };
+    el.addEventListener('input', () => { sync(); resetStats(); }); sync();
+  };
+  mk('movems',  v => MOVE_MS  = v, v => String(v));
+  mk('restcap', v => REST_CAP = v, v => String(v));
+}
+document.getElementById('accum').addEventListener('click', e => {
+  ACCUM_ON = !ACCUM_ON;
+  e.target.textContent = 'accum: ' + (ACCUM_ON ? 'on' : 'off');
+  e.target.classList.toggle('on', ACCUM_ON);
   if (panes) panes.B.reset = true;
   resetStats();
 });
-document.getElementById('blend').addEventListener('input', e => {
-  TAA_BLEND = parseFloat(e.target.value);
-  document.getElementById('blendV').textContent = TAA_BLEND.toFixed(2);
-});
-
 document.getElementById('diag').addEventListener('click', e => {
-  TAA_DIAG = !TAA_DIAG;
-  e.target.textContent = 'diag: ' + (TAA_DIAG ? 'on' : 'off');
-  e.target.classList.toggle('on', TAA_DIAG);
+  ACCUM_DIAG = !ACCUM_DIAG;
+  e.target.textContent = 'diag: ' + (ACCUM_DIAG ? 'on' : 'off');
+  e.target.classList.toggle('on', ACCUM_DIAG);
 });
 
 document.getElementById('ss').addEventListener('click', e => {

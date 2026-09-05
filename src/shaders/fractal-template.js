@@ -106,7 +106,7 @@ float calcSelfShadow(vec3 pos, vec3 lightPos) {
 
 void main() {
     // u_jitter offsets the SAMPLE POINT inside each pixel, in pixels. This is
-    // the correct place for a TAA jitter: the camera basis stays byte-identical
+    // the correct place for an accumulation jitter: the camera basis stays byte-identical
     // between frames, so history reprojection is exact. Tilting u_camDir
     // instead rotates the whole ray bundle, which shifts every pixel at every
     // depth by an amount the resolve cannot undo -- a uniform screen-space
@@ -324,7 +324,7 @@ export const mandelboxShaderSrc = buildFractalShader(
             vec4 gallery = texture(u_galleryColor, screenUV);
             gallery.rgb = mix(gallery.rgb, fogColor, fogAmount * 0.65);
             // Alpha must follow the shader's alphaOut, not the gallery texture's own
-            // alpha. A consumer that reads alpha as data (TAA reads it as ray
+            // alpha. A consumer that reads alpha as data (the accumulator reads it as ray
             // distance) would otherwise get the gallery's 1.0 here and
             // reconstruct a world position ~1 unit from the eye instead of at
             // the real surface -- a history fetch that swings ~0.8px every
