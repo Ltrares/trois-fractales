@@ -90,17 +90,17 @@ export function createWallTexture(gl) {
 
         // Subtitle (gallery location)
         ctx.fillStyle = '#000000';
-        ctx.font = 'italic 26px Georgia, serif';
-        ctx.fillText(sculpt.subtitle, textX, boxY + 95);
+        ctx.font = 'italic 29px Georgia, serif';
+        ctx.fillText(sculpt.subtitle, textX, boxY + 97);
 
         // Description
         ctx.fillStyle = '#000000';
-        ctx.font = '26px Georgia, serif';
+        ctx.font = '29px Georgia, serif';
         const lines = wrapText(ctx, sculpt.desc, textWidth);
         let y = boxY + 145;
         for (const line of lines) {
             ctx.fillText(line, textX, y);
-            y += 38;
+            y += 42;
         }
 
 
@@ -109,14 +109,14 @@ export function createWallTexture(gl) {
     // === GENERAL DESCRIPTION - MIDDLE AREA ===
     ctx.textAlign = 'left';
     ctx.fillStyle = '#000000';
-    ctx.font = '24px Georgia, serif';
+    ctx.font = '26px Georgia, serif';
     const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont les frontières de ces formules. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
     const generalLines = wrapText(ctx, generalDesc, 1200);
     let generalY = 1140;
 
     for (const line of generalLines) {
         ctx.fillText(line, 450, generalY);
-        generalY += 34;
+        generalY += 37;
     }
 
     // === SIGNATURE - BOTTOM RIGHT ===
