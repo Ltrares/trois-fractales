@@ -76,7 +76,6 @@ export class ShaderManager {
             camRight: gl.getUniformLocation(prog, 'u_camRight'),
             camUp: gl.getUniformLocation(prog, 'u_camUp'),
             zoom: gl.getUniformLocation(prog, 'u_zoom'),
-            jitter: gl.getUniformLocation(prog, 'u_jitter'),
             galleryColor: gl.getUniformLocation(prog, 'u_galleryColor'),
             galleryDepth: gl.getUniformLocation(prog, 'u_galleryDepth'),
             // Mandelbox params

@@ -8,7 +8,6 @@ import { vertexShaderSrc } from './shaders/common/vertex.js';
 import { galleryFragmentSrc } from './shaders/gallery.frag.js';
 import { mandelboxShaderSrc, mandelbulbShaderSrc, juliaShaderSrc } from './shaders/fractal-template.js';
 import { copyFragmentSrc } from './shaders/copy.frag.js';
-import { taaFragmentSrc } from './shaders/taa.frag.js';
 import { fxaaFragmentSrc } from './shaders/fxaa.frag.js';
 import { shadowBakeFragmentSrc } from './shaders/shadow-bake.frag.js';
 
@@ -69,13 +68,12 @@ const mandelboxProgram = shaderManager.createProgram(vertexShaderSrc, mandelboxS
 const mandelbulbProgram = shaderManager.createProgram(vertexShaderSrc, mandelbulbShaderSrc, 'mandelbulb');
 const juliaProgram = shaderManager.createProgram(vertexShaderSrc, juliaShaderSrc, 'julia');
 const copyProgram = shaderManager.createProgram(vertexShaderSrc, copyFragmentSrc, 'copy');
-const taaProgram = shaderManager.createProgram(vertexShaderSrc, taaFragmentSrc, 'taa');
 const fxaaProgram = shaderManager.createProgram(vertexShaderSrc, fxaaFragmentSrc, 'fxaa');
 const shadowBakeProgram = shaderManager.createProgram(vertexShaderSrc, shadowBakeFragmentSrc, 'shadowBake');
 
 console.log('[init] shaders compiled');
 
-if (!galleryProgram || !mandelboxProgram || !mandelbulbProgram || !juliaProgram || !copyProgram || !taaProgram || !fxaaProgram || !shadowBakeProgram) {
+if (!galleryProgram || !mandelboxProgram || !mandelbulbProgram || !juliaProgram || !copyProgram || !fxaaProgram || !shadowBakeProgram) {
     alert('Shader compilation failed - check console');
 }
 
@@ -87,7 +85,7 @@ gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
 // Setup vertex attribs for all programs
-const allPrograms = [galleryProgram, mandelboxProgram, mandelbulbProgram, juliaProgram, copyProgram, taaProgram, fxaaProgram, shadowBakeProgram];
+const allPrograms = [galleryProgram, mandelboxProgram, mandelbulbProgram, juliaProgram, copyProgram, fxaaProgram, shadowBakeProgram];
 shaderManager.setupVertexAttribs(allPrograms, vao);
 
 // Get uniform locations
@@ -101,12 +99,6 @@ const copyLocs = {
     resolution: gl.getUniformLocation(copyProgram, 'u_resolution')
 };
 
-const taaLocs = {
-    currentFrame: gl.getUniformLocation(taaProgram, 'u_currentFrame'),
-    history: gl.getUniformLocation(taaProgram, 'u_history'),
-    resolution: gl.getUniformLocation(taaProgram, 'u_resolution'),
-    blendFactor: gl.getUniformLocation(taaProgram, 'u_blendFactor')
-};
 
 const fxaaLocs = {
     texture: gl.getUniformLocation(fxaaProgram, 'u_texture'),
@@ -205,41 +197,14 @@ cameraController.onResume = () => {
     requestAnimationFrame(render);
 };
 
-// Halton sequence for TAA jitter (low-discrepancy quasi-random)
-function halton(index, base) {
-    let result = 0;
-    let f = 1 / base;
-    let i = index;
-    while (i > 0) {
-        result += f * (i % base);
-        i = Math.floor(i / base);
-        f /= base;
-    }
-    return result;
-}
-
-// 8-sample Halton jitter pattern (base 2, 3)
-const JITTER_SAMPLES = 8;
-let jitterIndex = 0;
-
-const JITTER_SCALE = 0.25;  // Reduce jitter to ±0.125 pixels (was ±0.5)
-
-function getJitter() {
-    const x = (halton(jitterIndex + 1, 2) - 0.5) * JITTER_SCALE;
-    const y = (halton(jitterIndex + 1, 3) - 0.5) * JITTER_SCALE;
-    jitterIndex = (jitterIndex + 1) % JITTER_SAMPLES;
-    return [x, y];
-}
-
 // Helper: set common camera uniforms
-function setCameraUniforms(locs, resolution, camPos, camDir, camRight, camUp, zoom, jitter) {
+function setCameraUniforms(locs, resolution, camPos, camDir, camRight, camUp, zoom) {
     gl.uniform2f(locs.resolution, resolution[0], resolution[1]);
     gl.uniform3fv(locs.camPos, camPos);
     gl.uniform3fv(locs.camDir, camDir);
     gl.uniform3fv(locs.camRight, camRight);
     gl.uniform3fv(locs.camUp, camUp);
     gl.uniform1f(locs.zoom, zoom);
-    gl.uniform2f(locs.jitter, jitter[0], jitter[1]);
 }
 
 // Animation state
@@ -266,10 +231,6 @@ function render() {
     const camRight = camera.getRight();
     const camUp = camera.getUp();
 
-    // Get jitter for TAA (only advance when not paused)
-    // Scale jitter inversely with zoom - when zoomed in, jitter should be smaller
-    const rawJitter = cameraController.isPaused ? [0, 0] : getJitter();
-    const jitter = [rawJitter[0] / camera.zoom, rawJitter[1] / camera.zoom];
 
     // Hold parameters still while paused, or while the visitor has frozen
     // them with P to line up a shot (they can still move and look around).
@@ -294,7 +255,7 @@ function render() {
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     gl.useProgram(galleryProgram);
-    setCameraUniforms(galleryLocs, [width, height], camera.pos, camDir, camRight, camUp, camera.zoom, jitter);
+    setCameraUniforms(galleryLocs, [width, height], camera.pos, camDir, camRight, camUp, camera.zoom);
     gl.uniform1f(galleryLocs.time, performance.now() * 0.001);
 
     // Fractal params for shadow casting
@@ -434,7 +395,7 @@ function render() {
     for (const pass of fractalPasses) {
         gl.scissor(pass.rect.x, pass.rect.y, pass.rect.w, pass.rect.h);
         gl.useProgram(pass.program);
-        setCameraUniforms(pass.locs, [width, height], camera.pos, camDir, camRight, camUp, camera.zoom, jitter);
+        setCameraUniforms(pass.locs, [width, height], camera.pos, camDir, camRight, camUp, camera.zoom);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, fboManager.galleryColorTex);
@@ -481,32 +442,13 @@ function render() {
 
     gl.disable(gl.SCISSOR_TEST);
 
-    // ========== TAA PASS (render to taaOutputFBO) ==========
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboManager.taaOutputFBO);
-    gl.viewport(0, 0, width, height);
-    gl.useProgram(taaProgram);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, fboManager.currentFrameTex);
-    gl.uniform1i(taaLocs.currentFrame, 0);
-
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, fboManager.historyTex);
-    gl.uniform1i(taaLocs.history, 1);
-
-    gl.uniform2f(taaLocs.resolution, width, height);
-    const blendFactor = fboManager.isTAAInitialized() ? 0.70 : 0.0;
-    gl.uniform1f(taaLocs.blendFactor, blendFactor);
-
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
     // ========== FXAA PASS + TEXT COMPOSITE (render to screen) ==========
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, width, height);
     gl.useProgram(fxaaProgram);
 
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, fboManager.taaOutputTex);
+    gl.bindTexture(gl.TEXTURE_2D, fboManager.currentFrameTex);
     gl.uniform1i(fxaaLocs.texture, 0);
 
     gl.activeTexture(gl.TEXTURE1);
@@ -517,17 +459,6 @@ function render() {
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // Copy current frame to history
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboManager.historyFBO);
-    gl.viewport(0, 0, width, height);
-    gl.useProgram(copyProgram);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, fboManager.currentFrameTex);
-    gl.uniform1i(copyLocs.texture, 0);
-    gl.uniform2f(copyLocs.resolution, width, height);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    fboManager.markTAAInitialized();
 
     // Update stats
     const totalPixels = width * height;

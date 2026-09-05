@@ -10,14 +10,9 @@ export class FBOManager {
         this.galleryDepthTex = null;
         this.galleryTextTex = null;  // Text layer for post-FXAA compositing
 
-        // TAA buffers
+        // Current frame buffer - the fractal passes render into this
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
-        this.historyFBO = null;
-        this.historyTex = null;
-        this.taaOutputFBO = null;
-        this.taaOutputTex = null;
-        this.taaInitialized = false;
 
         // Shadow baking (2D texture array)
         this.shadowArrayFBO = null;
@@ -57,13 +52,7 @@ export class FBOManager {
         if (this.galleryTextTex) gl.deleteTexture(this.galleryTextTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
-        if (this.historyFBO) gl.deleteFramebuffer(this.historyFBO);
-        if (this.historyTex) gl.deleteTexture(this.historyTex);
-        if (this.taaOutputFBO) gl.deleteFramebuffer(this.taaOutputFBO);
-        if (this.taaOutputTex) gl.deleteTexture(this.taaOutputTex);
 
-        // Reset TAA on resolution change
-        if (resolutionChanged) this.taaInitialized = false;
 
         // Color texture - use RGBA8 (universally supported)
         this.galleryColorTex = this.createColorTexture(width, height);
@@ -93,7 +82,7 @@ export class FBOManager {
             console.error('Gallery FBO not complete:', status);
         }
 
-        // Current frame buffer (for TAA input)
+        // Current frame buffer - fractal passes draw into this, FXAA reads it
         this.currentFrameTex = this.createColorTexture(width, height);
         this.currentFrameFBO = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.currentFrameFBO);
@@ -102,28 +91,6 @@ export class FBOManager {
         status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
         if (status !== gl.FRAMEBUFFER_COMPLETE) {
             console.error('Current frame FBO not complete:', status);
-        }
-
-        // History buffer (for TAA accumulation)
-        this.historyTex = this.createColorTexture(width, height);
-        this.historyFBO = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.historyFBO);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.historyTex, 0);
-
-        status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-            console.error('History FBO not complete:', status);
-        }
-
-        // TAA output buffer (for FXAA input)
-        this.taaOutputTex = this.createColorTexture(width, height);
-        this.taaOutputFBO = gl.createFramebuffer();
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.taaOutputFBO);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.taaOutputTex, 0);
-
-        status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (status !== gl.FRAMEBUFFER_COMPLETE) {
-            console.error('TAA output FBO not complete:', status);
         }
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -161,14 +128,6 @@ export class FBOManager {
         }
     }
 
-    markTAAInitialized() {
-        this.taaInitialized = true;
-    }
-
-    isTAAInitialized() {
-        return this.taaInitialized;
-    }
-
     dispose() {
         const gl = this.gl;
         if (this.galleryFBO) gl.deleteFramebuffer(this.galleryFBO);
@@ -176,10 +135,6 @@ export class FBOManager {
         if (this.galleryDepthTex) gl.deleteTexture(this.galleryDepthTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
-        if (this.historyFBO) gl.deleteFramebuffer(this.historyFBO);
-        if (this.historyTex) gl.deleteTexture(this.historyTex);
-        if (this.taaOutputFBO) gl.deleteFramebuffer(this.taaOutputFBO);
-        if (this.taaOutputTex) gl.deleteTexture(this.taaOutputTex);
         if (this.shadowArrayFBO) gl.deleteFramebuffer(this.shadowArrayFBO);
         if (this.shadowArrayTex) gl.deleteTexture(this.shadowArrayTex);
 
@@ -189,10 +144,6 @@ export class FBOManager {
         this.galleryTextTex = null;
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
-        this.historyFBO = null;
-        this.historyTex = null;
-        this.taaOutputFBO = null;
-        this.taaOutputTex = null;
         this.shadowArrayFBO = null;
         this.shadowArrayTex = null;
     }

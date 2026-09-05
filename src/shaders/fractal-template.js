@@ -11,7 +11,6 @@ uniform vec3 u_camDir;
 uniform vec3 u_camRight;
 uniform vec3 u_camUp;
 uniform float u_zoom;
-uniform vec2 u_jitter;
 uniform sampler2D u_galleryColor;
 uniform sampler2D u_galleryDepth;
 
@@ -101,8 +100,7 @@ float calcSelfShadow(vec3 pos, vec3 lightPos) {
 }
 
 void main() {
-    // Apply sub-pixel jitter for TAA temporal supersampling
-    vec2 uv = (gl_FragCoord.xy + u_jitter - 0.5 * u_resolution) / u_resolution.y;
+    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
     vec2 screenUV = gl_FragCoord.xy / u_resolution;
 
     vec3 ro = u_camPos;
