@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mandelbox Sparkle Test</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#111; color:#ddd; font:13px/1.4 -apple-system,system-ui,sans-serif; }
+  #panes { display:flex; gap:2px; }
+  .pane { position:relative; flex:1; }
+  .pane canvas { display:block; width:100%; height:auto; background:#000; }
+  .label { position:absolute; top:0; left:0; right:0; padding:6px 8px;
+           background:rgba(0,0,0,.62); font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .label b { color:#7ec8ff; font-weight:600; }
+  .fps { float:right; color:#9f9; font-variant-numeric:tabular-nums; }
+  #controls, .bar { padding:10px 12px; display:flex; flex-wrap:wrap; gap:16px; align-items:center;
+              border-top:1px solid #333; }
+  #controls label { display:flex; gap:6px; align-items:center; white-space:nowrap; }
+  input[type=range] { width:130px; }
+  .val { font-family:ui-monospace,Menlo,monospace; color:#7ec8ff; min-width:46px;
+         display:inline-block; font-variant-numeric:tabular-nums; }
+  button { background:#2a2a2a; color:#ddd; border:1px solid #444; padding:5px 11px;
+           border-radius:4px; cursor:pointer; font-size:12px; }
+  button:hover { background:#353535; }
+  button.on { background:#1d4a6a; border-color:#2f7fb5; color:#cfe9ff; }
+  #pagebar { border-top:none; padding-top:0; }
+  #hint { padding:0 12px 10px; color:#888; }
+  #err { padding:10px 12px; color:#ff8a8a; font-family:ui-monospace,monospace;
+         white-space:pre-wrap; display:none; }
+  .sep { width:1px; align-self:stretch; background:#333; }
+</style>
+</head>
+<body>
+
+<div id="panes">
+  <div class="pane">
+    <div class="label"><b id="nameA">A</b> <span class="fps" id="fpsA">–</span></div>
+    <canvas id="cvA"></canvas>
+  </div>
+  <div class="pane">
+    <div class="label"><b id="nameB">B</b> <span class="fps" id="fpsB">–</span></div>
+    <canvas id="cvB"></canvas>
+  </div>
+</div>
+
+<div id="controls">
+  <label>dist <input type="range" id="dist" min="1.4" max="14" step="0.05" value="7">
+    <span class="val" id="distV">7.00</span></label>
+  <label>orbit <input type="range" id="orbit" min="0" max="6.283" step="0.001" value="0.6">
+    <span class="val" id="orbitV">0.60</span></label>
+  <label>height <input type="range" id="hgt" min="-3" max="3" step="0.01" value="0.4">
+    <span class="val" id="hgtV">0.40</span></label>
+  <div class="sep"></div>
+  <label>s <input type="range" id="s" min="-3" max="3" step="0.01" value="1.96">
+    <span class="val" id="sV">1.96</span></label>
+  <label>minR <input type="range" id="minR" min="0.1" max="1" step="0.01" value="0.20">
+    <span class="val" id="minRV">0.20</span></label>
+  <label>fixR <input type="range" id="fixR" min="0.1" max="2" step="0.01" value="0.71">
+    <span class="val" id="fixRV">0.71</span></label>
+  <label>fold <input type="range" id="fold" min="0.2" max="2" step="0.01" value="1.0">
+    <span class="val" id="foldV">1.00</span></label>
+  <div class="sep"></div>
+
+  <button id="taa" class="on">TAA: on</button>
+  <button id="diag">diag: off</button>
+  <label>blend <input type="range" id="blend" min="0.05" max="1" step="0.01" value="0.12">
+    <span class="val" id="blendV">0.12</span></label>
+  <label title="sub-pixel jitter radius in pixels; 0 = sample pixel centre only">jitter
+    <input type="range" id="jit" min="0" max="0.5" step="0.01" value="0.5">
+    <span class="val" id="jitV">0.50</span></label>
+  <div class="sep"></div>
+  <button id="ss">SS: off</button>
+  <div class="sep"></div>
+  <button id="wobble">wobble: off</button>
+  <button id="normals">view: shaded</button>
+  <button id="res">res: 1x</button>
+</div>
+<div class="bar" id="pagebar">
+  <span style="color:#888">page:</span>
+  <span class="val" id="frameRate" style="min-width:150px;color:#9f9">–</span>
+</div>
+<div id="hint">
+  Drag a pane to orbit · scroll to dolly · <b>wobble</b> jitters the camera sub-pixel to expose
+  view-dependent sparkle while standing still.<br>
+  Timing: draw order alternates each frame; figure is the median of up to 240 samples
+  with ±half the 10–90 spread. Stats reset when a control changes.
+Pane B is TAA: Halton-jittered rays, history reprojected by world position, 3x3
+  neighbourhood clamp. <b>blend</b> is the fraction of the new frame taken each
+  frame (0.12 = keep 88% history). TAA off makes B identical to A.
+  <b>SS</b> now applies to both panes, so cone tracing can be judged with or without it.
+</div>
+<div id="err"></div>
+
+<script type="module">
+import { buildFractalShader } from './src/shaders/fractal-template.js';
+import { mandelboxDE } from './src/shaders/fractals/mandelbox-de.js';
+import { vertexShaderSrc } from './src/shaders/common/vertex.js';
+import { FRACTALS } from './src/geometry/GalleryGeometry.js';
+
+const mbx = FRACTALS.mandelbox;
+const g = (a) => a.map(v => v.toFixed(1)).join(', ');
+
+// ---- the two variants under comparison -------------------------------------
+// Both are built from the PRODUCTION template, so a variant is only an opts
+// delta. Nothing here re-implements the shader.
+const BASE = {
+  skipSelfShadow: false,
+  skipAO: true,
+  nearMissCheck: '',
+};
+
+const VARIANTS = {
+  A: {
+    name: 'baseline  k=0.001, hit=MIN_DIST',
+    opts: { ...BASE },
+  },
+  B: {
+    // TAA: jittered rays + reprojected history + neighbourhood clamp.
+    // Jitter is applied on the CPU as a sub-pixel camera offset (u_jitter),
+    // history is reprojected by world-position, and the clamp rejects history
+    // that falls outside the current 3x3 colour range -- the piece the old
+    // implementation lacked, which is why it smeared.
+    name: 'TAA  (jitter + reproject + clamp)',
+    // alpha carries ray distance t, so the TAA pass can reconstruct the world
+    // position of each hit without a second render target.
+    // alphaOut: hits carry ray distance t. alphaMiss: fog/miss pixels carry a
+    // negative sentinel so the resolve rejects them instead of reconstructing
+    // a world position from a t that never corresponded to a surface.
+    opts: { ...BASE, alphaOut: 't', alphaMiss: '-1.0' },
+    taa: true,
+  },
+};
+
+// ---- GL plumbing -----------------------------------------------------------
+function compile(gl, type, src, tag) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(sh);
+    const line = /ERROR: \d+:(\d+)/.exec(log);
+    let ctx = '';
+    if (line) {
+      const n = +line[1], L = src.split('\n');
+      ctx = '\n' + L.slice(Math.max(0, n - 4), n + 3)
+        .map((l, i) => String(Math.max(1, n - 3) + i).padStart(4) + ' | ' + l).join('\n');
+    }
+    throw new Error(`[${tag}] ${log}${ctx}`);
+  }
+  return sh;
+}
+
+function makePane(canvasId, variant) {
+  const cv = document.getElementById(canvasId);
+  const gl = cv.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
+  if (!gl) throw new Error('WebGL2 unavailable');
+
+  const opts = { ...variant.opts };
+  if (SHOW_NORMALS) opts.debugNormals = true;
+  const fragSrc = buildFractalShader(
+    mandelboxDE, variant.uniforms || '', g(mbx.position), g(mbx.bboxHalf), mbx.scale.toFixed(1),
+    'mix(vec3(0.25, 0.2, 0.2), vec3(0.89, 0.89, 0.90), iterProxy)',
+    g(mbx.spotlightOffset), '0.23', variant.specExp || '32.0', '20', opts
+  );
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'vert'));
+  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, fragSrc, variant.name));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(prog));
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, 'a_position');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  const U = n => gl.getUniformLocation(prog, n);
+  const locs = {
+    res: U('u_resolution'), camPos: U('u_camPos'), camDir: U('u_camDir'),
+    camRight: U('u_camRight'), camUp: U('u_camUp'), zoom: U('u_zoom'),
+    galleryColor: U('u_galleryColor'), galleryDepth: U('u_galleryDepth'),
+    jitter: U('u_jitter'),
+    s: U('u_mandelboxScale'), minR: U('u_mandelboxMinR'),
+    fixR: U('u_mandelboxFixedR'), fold: U('u_mandelboxFoldLimit'),
+    normalCoef: U('u_normalCoef'), coneK: U('u_coneK'), normK: U('u_normK'),
+    specK: U('u_specK'),
+  };
+
+  // The template samples a gallery colour/depth buffer for compositing and the
+  // early-out. Standing in for it: black colour, depth = 100 (nothing occludes),
+  // so the fractal is never clipped by scene geometry in this harness.
+  const mkTex = (px) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                  new Uint8Array(px));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return t;
+  };
+  const texColor = mkTex([0, 0, 0, 255]);
+  const texDepth = mkTex([255, 255, 255, 255]);   // 1.0 * 100 = far
+
+  const pane = { cv, gl, prog, locs, texColor, texDepth, name: variant.name,
+                 supersample: !!variant.supersample, taa: !!variant.taa };
+
+  if (pane.taa) {
+    // Two history buffers, ping-ponged. Float targets so repeated blending
+    // does not quantise.
+    const ext = gl.getExtension('EXT_color_buffer_float');
+    // RGBA32F is only filterable with this; without it a LINEAR fetch from the
+    // scene buffer returns black on some drivers. The resolve pass only ever
+    // samples pane.cur at exact texel centres, so NEAREST costs nothing here.
+    const extLin = gl.getExtension('OES_texture_float_linear');
+    pane.hist = [0, 1].map(() => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    });
+    pane.histFmt = ext ? gl.RGBA16F : gl.RGBA8;
+    pane.histType = ext ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    pane.floatHist = !!ext;
+    // Scene target: full float so the ray distance in alpha survives intact.
+    pane.sceneFmt = ext ? gl.RGBA32F : gl.RGBA8;
+    pane.sceneType = ext ? gl.FLOAT : gl.UNSIGNED_BYTE;
+    console.log('[TAA] EXT_color_buffer_float:', !!ext,
+                '| OES_texture_float_linear:', !!extLin,
+                '| history:', ext ? 'RGBA16F' : 'RGBA8 (8-bit feedback -> quantisation)',
+                '| scene:', ext ? 'RGBA32F (exact t)' : 'RGBA8 (t quantised -> reprojection WILL drift)');
+    pane.cur = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, pane.cur);
+    const curFilter = (ext && !extLin) ? gl.NEAREST : gl.LINEAR;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, curFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, curFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    pane.posTex = gl.createTexture();     // world position of each hit, for reprojection
+    gl.bindTexture(gl.TEXTURE_2D, pane.posTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    pane.fboScene = gl.createFramebuffer();
+    pane.fboHist = gl.createFramebuffer();
+    pane.taaW = pane.taaH = 0;
+    pane.histIdx = 0;
+    pane.reset = true;
+    pane.checked = false;
+
+    // Resolve: blend the jittered current frame into history AT THE SAME PIXEL.
+    //
+    // No reprojection. The jitter is a sub-pixel SAMPLE offset (u_jitter), not
+    // a motion: pixel (x,y) this frame and last frame are the same fragment at
+    // the same screen location, so there is nothing for a reprojection to
+    // invert. Reprojecting anyway injected the jitter into the output instead
+    // of averaging it out -- that was the original shake.
+    //
+    // A reprojected version was tried (see scratchpad/motion-attempt.html) to
+    // hold convergence under camera motion. Its geometry measured exact --
+    // 1e-4 px displacement over 90k parked pixels, zero rejections -- but it
+    // reintroduced shake on the PARKED case and the cause was never found.
+    // Reverted rather than left half-working. The identity test that validated
+    // the projection math is scratchpad/identity.js and is still good: the
+    // inverse is right, and the jitter must be subtracted from the projected
+    // coordinate (worth keeping if this is picked up again).
+    //
+    // Camera motion is handled by the age reset in the JS: when the basis
+    // changes there is no valid correspondence for a fragment-space
+    // accumulator, so history is restarted rather than warped.
+    const taaFrag = `#version 300 es
+precision highp float;
+uniform sampler2D u_cur;      // this frame, jittered (alpha = ray distance t)
+uniform sampler2D u_hist;     // accumulated history
+uniform vec2  u_res;
+uniform float u_wAge;         // 1/n running mean
+uniform int   u_reset;
+out vec4 fragColor;
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_res;
+    vec4 c4  = texture(u_cur, uv);
+    vec3 cur = c4.rgb;
+    float t  = c4.a;
+
+    if (u_reset == 1) { fragColor = vec4(cur, t); return; }
+
+    // Same pixel, every time. Hits and misses alike -- neither has parallax
+    // relative to a fragment-space jitter.
+    vec3 hist = texture(u_hist, uv).rgb;
+
+    // No neighbourhood clamp. A clamp exists to reject history that
+    // reprojection dragged in from somewhere else; with an in-place fetch the
+    // history is this pixel's own past, so there is nothing foreign to reject.
+    // (Added with the reprojection attempt, it actively fought the
+    // accumulator: its bounds were the 3x3 range of a single jittered sample,
+    // rebuilt every frame, so it kept dragging the converged mean back toward
+    // that frame's noise.)
+    fragColor = vec4(mix(hist, cur, u_wAge), t);
+}`;
+    const tp = gl.createProgram();
+    gl.attachShader(tp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'taa-vert'));
+    gl.attachShader(tp, compile(gl, gl.FRAGMENT_SHADER, taaFrag, 'taa'));
+    gl.linkProgram(tp);
+    if (!gl.getProgramParameter(tp, gl.LINK_STATUS))
+      throw new Error(gl.getProgramInfoLog(tp));
+    pane.taaProg = tp;
+    pane.taaLocs = {
+      cur: gl.getUniformLocation(tp, 'u_cur'), hist: gl.getUniformLocation(tp, 'u_hist'),
+      res: gl.getUniformLocation(tp, 'u_res'),
+      reset: gl.getUniformLocation(tp, 'u_reset'),
+      wAge: gl.getUniformLocation(tp, 'u_wAge'),
+    };
+    const tpos = gl.getAttribLocation(tp, 'a_position');
+    gl.enableVertexAttribArray(tpos);
+    gl.vertexAttribPointer(tpos, 2, gl.FLOAT, false, 0, 0);
+
+    // blit program to put the accumulated result on screen
+    // The diagnostic lives HERE, in the display pass, not in the resolve.
+    // Putting it in the resolve made it write its own tint colours into the
+    // history buffer it was reading back as "history" the next frame -- the
+    // measurement destroyed its own input and reported everything as unstable.
+    const showFrag = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;    // history just written this frame
+uniform sampler2D u_prev;   // history as of last frame
+uniform vec2 u_res;
+uniform int u_diag;
+out vec4 fragColor;
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_res;
+    vec4 c = texture(u_src, uv);
+    if (u_diag == 0) { fragColor = vec4(c.rgb, 1.0); return; }
+    // How much did the DISPLAYED pixel actually move since last frame? That is
+    // the sparkle, measured directly on the output. Amplified 20x so small
+    // per-frame changes are visible; grey = perfectly still.
+    vec3 p = texture(u_prev, uv).rgb;
+    float d = length(c.rgb - p) * 20.0;
+    fragColor = vec4(vec3(0.1) + vec3(d, d * 0.6, 0.0), 1.0);
+}`;
+    const sp = gl.createProgram();
+    gl.attachShader(sp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'show-vert'));
+    gl.attachShader(sp, compile(gl, gl.FRAGMENT_SHADER, showFrag, 'show'));
+    gl.linkProgram(sp);
+    pane.showProg = sp;
+    pane.showLocs = { src: gl.getUniformLocation(sp, 'u_src'), prev: gl.getUniformLocation(sp, 'u_prev'),
+                      res: gl.getUniformLocation(sp, 'u_res'), diag: gl.getUniformLocation(sp, 'u_diag') };
+    const spos = gl.getAttribLocation(sp, 'a_position');
+    gl.enableVertexAttribArray(spos);
+    gl.vertexAttribPointer(spos, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  if (pane.supersample) {
+    // Offscreen colour target + a blit program that box-filters SSxSS samples.
+    pane.fbo = gl.createFramebuffer();
+    pane.rt = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, pane.rt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    pane.rtW = pane.rtH = 0;
+
+    const blitFrag = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform vec2 u_dstRes;
+uniform int u_ss;
+out vec4 fragColor;
+void main() {
+    // Box filter over the SSxSS block of source texels backing this pixel.
+    vec3 acc = vec3(0.0);
+    float n = 0.0;
+    for (int y = 0; y < 4; y++) {
+        if (y >= u_ss) break;
+        for (int x = 0; x < 4; x++) {
+            if (x >= u_ss) break;
+            vec2 sp = (gl_FragCoord.xy - 0.5) * float(u_ss) + vec2(float(x), float(y)) + 0.5;
+            acc += texelFetch(u_src, ivec2(sp), 0).rgb;
+            n += 1.0;
+        }
+    }
+    fragColor = vec4(acc / n, 1.0);
+}`;
+    const bp = gl.createProgram();
+    gl.attachShader(bp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'blit-vert'));
+    gl.attachShader(bp, compile(gl, gl.FRAGMENT_SHADER, blitFrag, 'blit'));
+    gl.linkProgram(bp);
+    if (!gl.getProgramParameter(bp, gl.LINK_STATUS))
+      throw new Error(gl.getProgramInfoLog(bp));
+    pane.blit = bp;
+    pane.blitLocs = { src: gl.getUniformLocation(bp, 'u_src'),
+                      dstRes: gl.getUniformLocation(bp, 'u_dstRes'),
+                      ss: gl.getUniformLocation(bp, 'u_ss') };
+    const bpos = gl.getAttribLocation(bp, 'a_position');
+    gl.enableVertexAttribArray(bpos);
+    gl.vertexAttribPointer(bpos, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  return pane;
+}
+
+// ---- camera ----------------------------------------------------------------
+const target = mbx.position.slice();
+const cam = { dist: 7, orbit: 0.6, height: 0.4 };
+let WOBBLE = false, SHOW_NORMALS = false, RES = 1, SS = 1;
+let TAA_ON = true, TAA_BLEND = 0.12, TAA_JIT = 0.5, TAA_DIAG = false, taaFrame = 0;
+
+// Halton(2,3) low-discrepancy sequence for sub-pixel jitter.
+function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
+const JITTER = Array.from({ length: 16 }, (_, i) =>
+  [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
+
+// Reprojection uses the PREVIOUS frame's camera basis directly, inverting the
+// template's own ray construction:
+//     rd_unnorm = fwd*1.5*zoom + uvx*right + uvy*up,  uv in units of 1/res.y
+// so for a world point P, with v = P - eye projected onto the basis:
+//     uvx = (v.right) * 1.5*zoom / (v.fwd),  uvy = (v.up) * 1.5*zoom / (v.fwd)
+// A standard perspective matrix does NOT match this (verified: >100px error).
+
+
+// The TAA jitter is NOT applied here. It is a sub-pixel SAMPLE offset passed to
+// the shader as u_jitter, so there is exactly one camera basis per frame and
+// the reprojection inverts the same projection that produced the history.
+// A previous version also had a view-direction tilt in this function; it was
+// dead code (never called with sx/sy) and has been removed so there is only
+// one jitter mechanism to reason about.
+function cameraBasis(jx, jy) {
+  const p = [
+    target[0] + Math.sin(cam.orbit) * cam.dist,
+    target[1] + cam.height,
+    target[2] + Math.cos(cam.orbit) * cam.dist,
+  ];
+  let d = [target[0] - p[0], target[1] - p[1], target[2] - p[2]];
+  const dl = Math.hypot(...d); d = d.map(v => v / dl);
+  let r = [d[2], 0, -d[0]];
+  const rl = Math.hypot(...r) || 1; r = r.map(v => v / rl);
+  const u = [
+    r[1]*d[2] - r[2]*d[1], r[2]*d[0] - r[0]*d[2], r[0]*d[1] - r[1]*d[0],
+  ];
+  // Sub-pixel camera jitter: translating the eye by a tiny amount is the
+  // cleanest way to provoke the view-dependent instability while parked.
+  if (jx || jy) {
+    p[0] += r[0]*jx + u[0]*jy;
+    p[1] += r[1]*jx + u[1]*jy;
+    p[2] += r[2]*jx + u[2]*jy;
+  }
+  return { p, d, r, u };
+}
+
+// ---- render ----------------------------------------------------------------
+const wobbleJit = [0, 0];
+const params = { s: 1.96, minR: 0.20, fixR: 0.71, fold: 1.0, normalCoef: 0.002, coneK: 1.0, normK: 1.0, specK: 1.0 };
+
+function setSceneUniforms(pane, basis, rW, rH) {
+  const { gl, locs } = pane;
+  gl.uniform2f(locs.res, rW, rH);
+  if (locs.jitter) gl.uniform2f(locs.jitter, pane.jitter ? pane.jitter[0] : 0,
+                                             pane.jitter ? pane.jitter[1] : 0);
+  gl.uniform3fv(locs.camPos, basis.p);
+  gl.uniform3fv(locs.camDir, basis.d);
+  gl.uniform3fv(locs.camRight, basis.r);
+  gl.uniform3fv(locs.camUp, basis.u);
+  gl.uniform1f(locs.zoom, 1.0);
+  gl.uniform1f(locs.s, params.s);
+  gl.uniform1f(locs.minR, params.minR);
+  gl.uniform1f(locs.fixR, params.fixR);
+  gl.uniform1f(locs.fold, params.fold);
+  if (locs.normalCoef) gl.uniform1f(locs.normalCoef, params.normalCoef);
+  if (locs.coneK) gl.uniform1f(locs.coneK, params.coneK);
+  if (locs.normK) gl.uniform1f(locs.normK, params.normK);
+  if (locs.specK) gl.uniform1f(locs.specK, params.specK);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pane.texColor);
+  gl.uniform1i(locs.galleryColor, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, pane.texDepth);
+  gl.uniform1i(locs.galleryDepth, 1);
+}
+
+function draw(pane, basis, W, H) {
+  const { gl, prog, locs } = pane;
+  if (pane.cv.width !== W || pane.cv.height !== H) {
+    pane.cv.width = W; pane.cv.height = H;
+  }
+
+  const ss = pane.supersample ? SS : 1;
+  const rW = W * ss, rH = H * ss;
+
+  if (pane.taa && TAA_ON) { drawTAA(pane, basis, W, H); return; }
+
+  if (ss > 1) {
+    if (pane.rtW !== rW || pane.rtH !== rH) {
+      gl.bindTexture(gl.TEXTURE_2D, pane.rt);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, rW, rH, 0, gl.RGBA,
+                    gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                              gl.TEXTURE_2D, pane.rt, 0);
+      pane.rtW = rW; pane.rtH = rH;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fbo);
+  } else {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  gl.viewport(0, 0, rW, rH);
+  gl.useProgram(prog);
+  gl.clearColor(0.06, 0.06, 0.07, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+
+  setSceneUniforms(pane, basis, rW, rH);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  if (ss > 1) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    gl.useProgram(pane.blit);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, pane.rt);
+    gl.uniform1i(pane.blitLocs.src, 0);
+    gl.uniform2f(pane.blitLocs.dstRes, W, H);
+    gl.uniform1i(pane.blitLocs.ss, ss);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+}
+
+// Renders the scene jittered into an offscreen buffer, resolves against the
+// reprojected history, then shows the accumulated result.
+
+function drawTAA(pane, basis, W, H) {
+  const { gl, prog, locs } = pane;
+
+  if (pane.taaW !== W || pane.taaH !== H) {
+    // History is a colour accumulator -- half float is plenty.
+    for (const t of pane.hist) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, pane.histFmt, W, H, 0, gl.RGBA, pane.histType, null);
+    }
+    // The scene buffer is NOT just colour: its alpha carries the ray distance
+    // t, which the resolve pass turns back into a world position. At half
+    // float the ULP near t=8 is ~8e-3, which displaces the reprojected history
+    // fetch by up to ~0.6px -- several times larger than any geometric error,
+    // and it moves every frame because the jitter changes t. That is shake,
+    // and an always-off-grid bilinear tap, i.e. permanent softening.
+    // Full float t makes the reconstruction exact.
+    gl.bindTexture(gl.TEXTURE_2D, pane.cur);
+    gl.texImage2D(gl.TEXTURE_2D, 0, pane.sceneFmt, W, H, 0, gl.RGBA,
+                  pane.sceneType, null);
+    pane.taaW = W; pane.taaH = H; pane.reset = true;
+    if (!pane.checked) {
+      pane.checked = true;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pane.hist[0], 0);
+      const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      console.log('[TAA] history FBO status:',
+        st === gl.FRAMEBUFFER_COMPLETE ? 'COMPLETE'
+          : 'INCOMPLETE (0x' + st.toString(16) + ') -- history is NOT being written');
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+  }
+
+  // 1. scene, rendered with a sub-pixel SAMPLE offset (u_jitter)
+  //
+  // The jitter is ALWAYS on. Averaging sub-pixel sample positions over time is
+  // the entire antialiasing mechanism of TAA -- it is what turns N temporal
+  // samples into N spatial samples per pixel. A previous version disabled the
+  // jitter whenever the camera was parked, on the theory that a converged
+  // jittered average is a box filter and therefore softer than the pixel-centre
+  // sample. That is true and irrelevant: with no jitter every frame samples the
+  // identical point, so the accumulator converges to exactly the aliased
+  // single-sample image and TAA provably does nothing. Box-filtering the pixel
+  // is the POINT, not a defect; if it is too soft, that is what u_blend and the
+  // jitter radius are for.
+  //
+  // One camera basis per frame, identical to the previous frame's when parked,
+  // so the reprojection inverts the same projection that produced the history.
+  const [jxN, jyN] = JITTER[taaFrame % JITTER.length];
+  const wj0 = WOBBLE ? wobbleJit[0] : 0, wj1 = WOBBLE ? wobbleJit[1] : 0;
+  const ub = cameraBasis(wj0, wj1);
+  // Jitter radius in pixels. At 0 every frame samples the pixel centre and the
+  // accumulator converges to exactly pane A -- no antialiasing, no softening.
+  // At 0.5 the samples cover the whole pixel, so the converged image is a box
+  // filter over the pixel footprint: antialiased, but softer than A's single
+  // centre sample on detail that was never aliased to begin with.
+  pane.jitter = [jxN * (TAA_JIT / 0.5), jyN * (TAA_JIT / 0.5)];
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboScene);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pane.cur, 0);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(prog);
+  // Match pane A's background so the two panes are actually comparable; alpha
+  // 0 marks "no surface here" for the resolve.
+  gl.clearColor(0.06, 0.06, 0.07, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  setSceneUniforms(pane, ub, W, H);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // 2. resolve against reprojected history
+  const dst = pane.hist[pane.histIdx ^ 1], src = pane.hist[pane.histIdx];
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(pane.taaProg);
+  const L = pane.taaLocs;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pane.cur);
+  gl.uniform1i(L.cur, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src);
+  gl.uniform1i(L.hist, 1);
+  gl.uniform2f(L.res, W, H);
+  // No camera uniforms: the resolve fetches history at the same pixel, so it
+  // needs neither basis nor jitter.
+  //
+  // Without reprojection, history is only valid while the camera holds still:
+  // a fragment-space accumulator cannot follow a surface that moved to a
+  // different pixel. So the age restarts whenever the basis changes, and the
+  // accumulation rebuilds over the frames after the camera settles. Sharp and
+  // converged when parked, single-sample while actually moving.
+  const camKey = ub.p.join(',') + '|' + ub.d.join(',');
+  if (pane.camKey !== camKey) { pane.age = 0; pane.camKey = camKey; }
+  pane.age = pane.reset ? 1 : (pane.age || 0) + 1;
+
+  // TRUE running mean: 1/n, no floor. A floor made this an EMA with a window
+  // shorter than the 16-frame Halton cycle, so it averaged half a repeating
+  // pattern and oscillated with it forever instead of converging -- the orange
+  // edge flicker, and why lowering blend made it dimmer but not different.
+  gl.uniform1f(L.wAge, 1.0 / pane.age);
+  gl.uniform1i(L.reset, pane.reset ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  pane.reset = false;
+
+  // 3. show
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(pane.showProg);
+  gl.clearColor(0.06, 0.06, 0.07, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, dst);
+  gl.uniform1i(pane.showLocs.src, 0);
+  // src is the history written this frame; prev is the one it was blended from.
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src);
+  gl.uniform1i(pane.showLocs.prev, 1);
+  gl.uniform1i(pane.showLocs.diag, TAA_DIAG ? 1 : 0);
+  gl.uniform2f(pane.showLocs.res, W, H);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  pane.histIdx ^= 1;
+
+  // __taaStability: with the camera parked, measure how much the DISPLAYED
+  // image actually changes frame to frame. This is the number that matters --
+  // it is the shake, measured directly, rather than inferred from geometry.
+  if (window.__taaStability) {
+    const N = 64;
+    const cx = Math.floor(W / 2) - N / 2, cy = Math.floor(H / 2) - N / 2;
+    const buf = new Float32Array(4 * N * N);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+    gl.readPixels(cx, cy, N, N, gl.RGBA, gl.FLOAT, buf);
+    if (pane._prevFrame) {
+      let sum = 0, mx = 0, n = 0;
+      for (let i = 0; i < N * N; i++) {
+        for (let c = 0; c < 3; c++) {
+          const d = Math.abs(buf[i*4+c] - pane._prevFrame[i*4+c]);
+          sum += d; mx = Math.max(mx, d); n++;
+        }
+      }
+      (pane._stab ||= []).push(sum / n);
+      if (pane._stab.length % 30 === 0) {
+        const w = pane._stab.slice(-30);
+        console.log('[stability]', pane.name.padEnd(34),
+          'mean |delta| per frame', (w.reduce((a,b)=>a+b,0)/w.length).toExponential(3),
+          '| peak', mx.toExponential(2));
+      }
+    }
+    pane._prevFrame = buf;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  if (window.__taaProbe) {
+    window.__taaProbe = false;
+    const rd = (tex, label) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      const px = new Float32Array(4 * 16);
+      const cx = Math.floor(W / 2), cy = Math.floor(H / 2);
+      gl.readPixels(cx, cy, 4, 4, gl.RGBA, gl.FLOAT, px);
+      const s4 = [];
+      for (let i = 0; i < 4; i++)
+        s4.push('(' + [0,1,2,3].map(c => px[i*4+c].toFixed(3)).join(',') + ')');
+      console.log('[probe]', label.padEnd(12), s4.join(' '));
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    };
+    console.log('--- TAA probe at frame', taaFrame, '| blend', TAA_BLEND, '| jitter', TAA_JIT);
+    rd(pane.cur, 'scene(cur)');
+    rd(pane.hist[0], 'hist[0]');
+    rd(pane.hist[1], 'hist[1]');
+    console.log('[probe] showing hist index', pane.histIdx ^ 1);
+  }
+}
+
+// Per-pane GPU timing via EXT_disjoint_timer_query_webgl2. gl.finish() is not
+// a reliable fence in browsers, so wall-clock around a draw measures CPU
+// submission, not render cost. Timer queries ask the GPU itself and resolve
+// asynchronously, a few frames later.
+//
+// Reported ms is GPU time for that pane's draw. "eq fps" is the frame rate
+// that cost alone implies (1000/ms) -- NOT the page's actual frame rate, which
+// is vsync-capped and shared by both panes. It is a cost comparison number.
+function makeGpuTimer(gl, el) {
+  const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  if (!ext) {
+    el.textContent = 'GPU timing unavailable';
+    return { begin(){}, end(){}, poll(){}, reset(){} };
+  }
+  const inFlight = [];
+  const samples = [];
+  let last = 0, active = null;
+  return {
+    begin() {
+      if (active || inFlight.length > 3) return;
+      active = gl.createQuery();
+      gl.beginQuery(ext.TIME_ELAPSED_EXT, active);
+    },
+    end() {
+      if (!active) return;
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+      inFlight.push(active); active = null;
+    },
+    poll() {
+      while (inFlight.length) {
+        const q = inFlight[0];
+        if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
+        const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT);
+        const ns = gl.getQueryParameter(q, gl.QUERY_RESULT);
+        gl.deleteQuery(q); inFlight.shift();
+        if (!disjoint) { samples.push(ns / 1e6); if (samples.length > 240) samples.shift(); }
+      }
+      const now = performance.now();
+      if (samples.length >= 8 && now - last > 400) {
+        // Median over a rolling window, not a short-window mean: GPU timing is
+        // noisy and occasionally spikes, and a median ignores those outliers.
+        const v = samples.slice().sort((a, b) => a - b);
+        const med = v[v.length >> 1];
+        const p10 = v[Math.floor(v.length * 0.1)], p90 = v[Math.floor(v.length * 0.9)];
+        el.textContent = `${med.toFixed(2)} ms · ${(1000 / med).toFixed(0)} eq fps ` +
+                         `· ±${((p90 - p10) / 2).toFixed(2)} n=${v.length}`;
+        last = now;
+      }
+    },
+    reset() { samples.length = 0; },
+  };
+}
+
+// Actual page frame rate, measured once for the whole rAF loop.
+function makeFrameRate(el) {
+  let n = 0, last = performance.now();
+  return () => {
+    n++;
+    const now = performance.now();
+    if (now - last > 500) {
+      el.textContent = `${(n * 1000 / (now - last)).toFixed(0)} fps · ` +
+                       `${((now - last) / n).toFixed(1)} ms/frame`;
+      n = 0; last = now;
+    }
+  };
+}
+
+let panes = null, tA = null, tB = null, frameRate = null, frameParity = 0;
+
+function build() {
+  document.getElementById('err').style.display = 'none';
+  try {
+    panes = {
+      A: makePane('cvA', VARIANTS.A),
+      B: makePane('cvB', VARIANTS.B),
+    };
+    document.getElementById('nameA').textContent = VARIANTS.A.name;
+    document.getElementById('nameB').textContent = VARIANTS.B.name;
+  } catch (e) {
+    const el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = 'Shader build failed:\n' + e.message;
+    panes = null;
+  }
+}
+
+build();
+if (panes) {
+  tA = makeGpuTimer(panes.A.gl, document.getElementById('fpsA'));
+  tB = makeGpuTimer(panes.B.gl, document.getElementById('fpsB'));
+}
+frameRate = makeFrameRate(document.getElementById('frameRate'));
+
+function frame() {
+  if (panes) {
+    const W = Math.max(2, Math.floor(panes.A.cv.clientWidth * RES));
+    const H = Math.max(2, Math.floor(W * 0.78));
+
+    let jx = 0, jy = 0;
+    taaFrame++;
+    if (WOBBLE) {
+      // ~1/3 pixel of world-space movement at the current distance
+      const perPixel = (2.0 * cam.dist) / H;
+      const t = performance.now() * 0.006;
+      jx = Math.sin(t) * perPixel * 0.33;
+      jy = Math.cos(t * 1.37) * perPixel * 0.33;
+    }
+    wobbleJit[0] = jx; wobbleJit[1] = jy;
+    const basis = cameraBasis(jx, jy);
+
+    // Alternate which pane is drawn first. Whichever goes second inherits a
+    // warmed GPU, so a fixed order biases the comparison systematically --
+    // averaging longer would not remove it, only alternating does.
+    if (frameParity++ & 1) {
+      tA.begin(); draw(panes.A, basis, W, H); tA.end();
+      tB.begin(); draw(panes.B, basis, W, H); tB.end();
+    } else {
+      tB.begin(); draw(panes.B, basis, W, H); tB.end();
+      tA.begin(); draw(panes.A, basis, W, H); tA.end();
+    }
+    tA.poll(); tB.poll();
+  }
+  frameRate();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- controls --------------------------------------------------------------
+const resetStats = () => { tA && tA.reset(); tB && tB.reset(); };
+
+const bind = (id, key, obj, fmt = v => v.toFixed(2)) => {
+  const el = document.getElementById(id), out = document.getElementById(id + 'V');
+  const sync = () => { obj[key] = parseFloat(el.value); out.textContent = fmt(obj[key]); };
+  el.addEventListener('input', () => { sync(); resetStats(); }); sync();
+};
+bind('dist', 'dist', cam); bind('orbit', 'orbit', cam); bind('hgt', 'height', cam);
+bind('s', 's', params); bind('minR', 'minR', params);
+bind('fixR', 'fixR', params); bind('fold', 'fold', params);
+
+const syncCam = () => {
+  document.getElementById('dist').value = cam.dist;
+  document.getElementById('distV').textContent = cam.dist.toFixed(2);
+  document.getElementById('orbit').value = cam.orbit;
+  document.getElementById('orbitV').textContent = cam.orbit.toFixed(2);
+};
+
+document.getElementById('wobble').addEventListener('click', e => {
+  WOBBLE = !WOBBLE;
+  e.target.textContent = 'wobble: ' + (WOBBLE ? 'on' : 'off');
+  e.target.classList.toggle('on', WOBBLE);
+  resetStats();
+});
+document.getElementById('normals').addEventListener('click', e => {
+  SHOW_NORMALS = !SHOW_NORMALS;
+  e.target.textContent = 'view: ' + (SHOW_NORMALS ? 'normals' : 'shaded');
+  e.target.classList.toggle('on', SHOW_NORMALS);
+  build();
+  if (panes) {
+    tA = makeGpuTimer(panes.A.gl, document.getElementById('fpsA'));
+    tB = makeGpuTimer(panes.B.gl, document.getElementById('fpsB'));
+  }
+});
+{
+  const el = document.getElementById('jit'), out = document.getElementById('jitV');
+  const sync = () => {
+    TAA_JIT = parseFloat(el.value); out.textContent = TAA_JIT.toFixed(2);
+    // Restart accumulation so the new radius is judged converged, not mid-fade.
+    if (panes && panes.B) panes.B.reset = true;
+  };
+  el.addEventListener('input', () => { sync(); resetStats(); }); sync();
+}
+document.getElementById('taa').addEventListener('click', e => {
+  TAA_ON = !TAA_ON;
+  e.target.textContent = 'TAA: ' + (TAA_ON ? 'on' : 'off');
+  e.target.classList.toggle('on', TAA_ON);
+  if (panes) panes.B.reset = true;
+  resetStats();
+});
+document.getElementById('blend').addEventListener('input', e => {
+  TAA_BLEND = parseFloat(e.target.value);
+  document.getElementById('blendV').textContent = TAA_BLEND.toFixed(2);
+});
+
+document.getElementById('diag').addEventListener('click', e => {
+  TAA_DIAG = !TAA_DIAG;
+  e.target.textContent = 'diag: ' + (TAA_DIAG ? 'on' : 'off');
+  e.target.classList.toggle('on', TAA_DIAG);
+});
+
+document.getElementById('ss').addEventListener('click', e => {
+  SS = SS === 1 ? 2 : SS === 2 ? 3 : SS === 3 ? 4 : 1;
+  e.target.textContent = 'SS: ' + (SS === 1 ? 'off' : SS + 'x' + SS);  // applies to BOTH panes
+  e.target.classList.toggle('on', SS !== 1);
+  resetStats();
+});
+
+document.getElementById('res').addEventListener('click', e => {
+  RES = RES === 1 ? 0.5 : RES === 0.5 ? 2 : 1;
+  e.target.textContent = 'res: ' + RES + 'x';
+  e.target.classList.toggle('on', RES !== 1);
+  resetStats();
+});
+
+// drag to orbit, scroll to dolly
+let drag = null;
+document.getElementById('panes').addEventListener('mousedown', e => {
+  drag = { x: e.clientX, y: e.clientY }; e.preventDefault();
+});
+addEventListener('mouseup', () => drag = null);
+addEventListener('mousemove', e => {
+  if (!drag) return;
+  cam.orbit += (e.clientX - drag.x) * 0.005;
+  cam.height = Math.max(-3, Math.min(3, cam.height - (e.clientY - drag.y) * 0.01));
+  drag = { x: e.clientX, y: e.clientY };
+  document.getElementById('hgt').value = cam.height;
+  document.getElementById('hgtV').textContent = cam.height.toFixed(2);
+  syncCam();
+});
+document.getElementById('panes').addEventListener('wheel', e => {
+  cam.dist = Math.max(1.4, Math.min(14, cam.dist + e.deltaY * 0.004));
+  syncCam(); e.preventDefault();
+}, { passive: false });
+</script>
+</body>
+</html>

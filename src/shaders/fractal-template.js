@@ -6,6 +6,7 @@ precision highp float;
 out vec4 fragColor;
 
 uniform vec2 u_resolution;
+uniform vec2 u_jitter;   // sub-pixel sample offset, in pixels (0,0 = centre)
 uniform vec3 u_camPos;
 uniform vec3 u_camDir;
 uniform vec3 u_camRight;
@@ -57,14 +58,18 @@ float sceneDE(vec3 p) {
     return max(fd, clip);
 }
 
-vec3 calcNormal(vec3 p) {
-    // Tetrahedron technique - 4 samples, more symmetric than forward differences
-    const vec2 e = vec2(0.001, -0.001);
+vec3 calcNormal(vec3 p, float t) {
+    // Tetrahedron technique - 4 samples, more symmetric than forward differences.
+    // Sample width scales with ray distance: a fixed 0.001 offset is far finer
+    // than a pixel at range, so it resolves DE noise rather than visible surface.
+    // Signs stay unit so only the sample width changes, not the weighting.
+    float k = {{NORMAL_EPSILON}};
+    const vec2 s = vec2(1.0, -1.0);
     return normalize(
-        e.xyy * sceneDE(p + e.xyy) +
-        e.yyx * sceneDE(p + e.yyx) +
-        e.yxy * sceneDE(p + e.yxy) +
-        e.xxx * sceneDE(p + e.xxx)
+        s.xyy * sceneDE(p + s.xyy * k) +
+        s.yyx * sceneDE(p + s.yyx * k) +
+        s.yxy * sceneDE(p + s.yxy * k) +
+        s.xxx * sceneDE(p + s.xxx * k)
     );
 }
 
@@ -100,7 +105,13 @@ float calcSelfShadow(vec3 pos, vec3 lightPos) {
 }
 
 void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
+    // u_jitter offsets the SAMPLE POINT inside each pixel, in pixels. This is
+    // the correct place for a TAA jitter: the camera basis stays byte-identical
+    // between frames, so history reprojection is exact. Tilting u_camDir
+    // instead rotates the whole ray bundle, which shifts every pixel at every
+    // depth by an amount the resolve cannot undo -- a uniform screen-space
+    // shake that never converges.
+    vec2 uv = (gl_FragCoord.xy + u_jitter - 0.5 * u_resolution) / u_resolution.y;
     vec2 screenUV = gl_FragCoord.xy / u_resolution;
 
     vec3 ro = u_camPos;
@@ -132,7 +143,7 @@ void main() {
         vec3 p = ro + rd * t;
         d = sceneDE(p);
         {{RAY_MARCH_BOUNDARY_CHECK}}
-        if (d < MIN_DIST) {
+        if (d < {{HIT_EPSILON}}) {
             {{RAY_MARCH_HIT_CHECK}}
             hit = true;
             break;
@@ -144,6 +155,10 @@ void main() {
     // Near-miss check: if we got close but exhausted steps, treat as hit
     {{NEAR_MISS_CHECK}}
 
+    // Debug write happens before the miss path, so misses report their step
+    // count instead of discarding.
+    {{DEBUG_FLAT}}
+
     if (!hit) {
         {{FOG_MISS}}
         discard;
@@ -151,7 +166,8 @@ void main() {
 
     // Shade the fractal
     vec3 pos = ro + rd * t;
-    vec3 nor = calcNormal(pos);
+    vec3 nor = calcNormal(pos, t);
+    {{DEBUG_NORMALS}}
 
     vec3 lightDir = normalize(vec3(0.2, 1.0, 0.3));
     vec3 viewDir = -rd;
@@ -197,7 +213,7 @@ void main() {
     {{FOG_BLEND}}
 
     col = pow(col, vec3(0.4545));
-    fragColor = vec4(col, 1.0);
+    fragColor = vec4(col, {{ALPHA_OUT}});
 }`;
 
 // Build fractal shaders from template
@@ -234,6 +250,14 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         .replace('{{AO_STRENGTH}}', aoStrength)
         .replace('{{AMBIENT}}', ambient)
         .replace('{{DIFFUSE_CALC}}', diffuseCalc)
+        .replace('{{HIT_EPSILON}}', opts.hitEpsilon || 'MIN_DIST')
+        .replace('{{NORMAL_EPSILON}}', opts.normalEpsilon || '0.001')
+        .replace('{{DEBUG_FLAT}}', opts.debugFlat
+            ? `fragColor = vec4(hit ? 1.0 : 0.0, float(stepsTaken) / float(MAX_STEPS), 0.0, 1.0); return;`
+            : '')
+        .replace('{{DEBUG_NORMALS}}', opts.debugNormals
+            ? `fragColor = vec4(nor * 0.5 + 0.5, ${opts.alphaOut || '1.0'}); return;`
+            : '')
         .replace('{{REFRESH_DE}}', refreshDE)
         .replace('{{RAY_MARCH_INIT}}', opts.init || '')
         .replace('{{RAY_MARCH_BOUNDARY_CHECK}}', opts.boundaryCheck || '')
@@ -242,7 +266,18 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         .replace('{{FOG_BLEND}}', opts.fogBlend || '')
         .replace('{{FOG_MISS}}', opts.fogMiss || '')
         .replace('{{CLIP_MODIFIER}}', opts.clipModifier || '')
-        .replace('{{NEAR_MISS_CHECK}}', opts.nearMissCheck || '');
+        .replace('{{NEAR_MISS_CHECK}}', opts.nearMissCheck || '')
+        // Alpha LAST. The opts blocks above (notably fogMiss) contain alpha
+        // placeholders of their own, and they are only present in the source
+        // once those blocks have been injected. Substituting alpha earlier
+        // left {{ALPHA_MISS}} literal in the mandelbox fog path -- a GLSL
+        // syntax error that stopped the shader compiling at all.
+        //
+        // Non-hit pixels (fog/miss): alphaMiss defaults to matching alphaOut,
+        // but a consumer reading alpha as data wants a rejectable sentinel.
+        .replace(/\{\{ALPHA_MISS\}\}/g,
+            opts.alphaMiss || opts.alphaOut || '1.0')
+        .replace(/\{\{ALPHA_OUT\}\}/g, opts.alphaOut || '1.0');
 }
 
 // Pre-built fractal shader sources
@@ -288,7 +323,13 @@ export const mandelboxShaderSrc = buildFractalShader(
             vec3 fogColor = vec3(0.21, 0.22, 0.23) + vec3(0.2, 0.19, 0.21) * spotLight;
             vec4 gallery = texture(u_galleryColor, screenUV);
             gallery.rgb = mix(gallery.rgb, fogColor, fogAmount * 0.65);
-            fragColor = gallery;
+            // Alpha must follow the shader's alphaOut, not the gallery texture's own
+            // alpha. A consumer that reads alpha as data (TAA reads it as ray
+            // distance) would otherwise get the gallery's 1.0 here and
+            // reconstruct a world position ~1 unit from the eye instead of at
+            // the real surface -- a history fetch that swings ~0.8px every
+            // frame with the camera parked.
+            fragColor = vec4(gallery.rgb, {{ALPHA_MISS}});
             return;
         }`
     }
