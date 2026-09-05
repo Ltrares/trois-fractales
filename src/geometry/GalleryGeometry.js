@@ -62,21 +62,23 @@ export const CEILING_LIGHTS = {
 //   atten     - distance falloff
 //   intensity - brightness
 //
-// These used to be decided in the shader generator by list index (i === 2),
-// which meant a light's shape depended on its position in this object and a
-// newly added light silently inherited another light's settings.
+// These three used to have those values chosen in the shader generator by list
+// index (i === 2), so a light's shape depended on where it sat in this object
+// and any new light silently inherited another light's settings.
 export const WALL_SPOTLIGHTS = {
     left: { position: [-3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0], falloff: 6.0, atten: 0.05, intensity: 0.8 },
     right: { position: [3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0], falloff: 6.0, atten: 0.05, intensity: 0.8 },
     top: { position: [0.0, 4.8, 4.0], target: [0.0, 3.5, 5.0], falloff: 4.0, atten: 0.06, intensity: 0.6 },
 
-    // The three lights above pool in the middle of the wall. The text blocks
-    // run out to x=+-4.9, where those cones have fallen off, leaving the outer
-    // columns dimmer than the centre one. These two even out the width. They
-    // sit at floor level raking upward, matching the left/right fixtures, and
-    // use a wider cone (lower falloff) to wash rather than spotlight.
-    outerLeft: { position: [-4.5, 0.2, 3.5], target: [-4.2, 3.2, 6.0], falloff: 3.0, atten: 0.05, intensity: 0.75 },
-    outerRight: { position: [4.5, 0.2, 3.5], target: [4.2, 3.2, 6.0], falloff: 3.0, atten: 0.05, intensity: 0.75 },
+    // One light per text panel. The three above wash the upper wall and the
+    // title; these aim at the centre of each description block so no panel is
+    // left reading against unlit concrete. Ceiling mounted and angled down, so
+    // the light falls across the text rather than raking up into the reader's
+    // eye. Wide cones (low falloff) to cover a whole panel evenly - these are
+    // washes, not accents, and stay dimmer than the title lights.
+    panelLeft: { position: [-2.8, 4.7, 3.3], target: [-2.78, 3.26, 5.0], falloff: 3.5, atten: 0.05, intensity: 0.55 },
+    panelCenter: { position: [0.1, 4.7, 3.3], target: [0.09, 2.18, 5.0], falloff: 3.5, atten: 0.05, intensity: 0.55 },
+    panelRight: { position: [2.8, 4.7, 3.3], target: [2.79, 3.26, 5.0], falloff: 3.5, atten: 0.05, intensity: 0.55 },
 };
 
 // ============ EASTER EGG: PEEPHOLE ============
