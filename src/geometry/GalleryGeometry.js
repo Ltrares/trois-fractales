@@ -57,10 +57,26 @@ export const CEILING_LIGHTS = {
     atriumCenter: { position: [0.0, 4.8, 0.0], aimDir: [0.0, -1.0, 0.0] },
 };
 
+// Front wall spotlights. Each light carries its own cone and brightness:
+//   falloff   - cone tightness, higher is narrower (pow on the cone dot)
+//   atten     - distance falloff
+//   intensity - brightness
+//
+// These used to be decided in the shader generator by list index (i === 2),
+// which meant a light's shape depended on its position in this object and a
+// newly added light silently inherited another light's settings.
 export const WALL_SPOTLIGHTS = {
-    left: { position: [-3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0] },
-    right: { position: [3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0] },
-    top: { position: [0.0, 4.8, 4.0], target: [0.0, 3.5, 5.0] },
+    left: { position: [-3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0], falloff: 6.0, atten: 0.05, intensity: 0.8 },
+    right: { position: [3.0, 0.2, 3.5], target: [0.0, 4.0, 6.0], falloff: 6.0, atten: 0.05, intensity: 0.8 },
+    top: { position: [0.0, 4.8, 4.0], target: [0.0, 3.5, 5.0], falloff: 4.0, atten: 0.06, intensity: 0.6 },
+
+    // The three lights above pool in the middle of the wall. The text blocks
+    // run out to x=+-4.9, where those cones have fallen off, leaving the outer
+    // columns dimmer than the centre one. These two even out the width. They
+    // sit at floor level raking upward, matching the left/right fixtures, and
+    // use a wider cone (lower falloff) to wash rather than spotlight.
+    outerLeft: { position: [-4.5, 0.2, 3.5], target: [-4.2, 3.2, 6.0], falloff: 3.0, atten: 0.05, intensity: 0.75 },
+    outerRight: { position: [4.5, 0.2, 3.5], target: [4.2, 3.2, 6.0], falloff: 3.0, atten: 0.05, intensity: 0.75 },
 };
 
 // ============ EASTER EGG: PEEPHOLE ============

@@ -155,9 +155,21 @@ function generateWallSpotlights() {
         lines.push(`        vec3 wallSpot${num}Dir = normalize(pos - wallSpot${num}Pos);`);
         lines.push(`        float wallSpot${num}Cone = max(dot(wallSpot${num}Dir, wallSpot${num}Aim), 0.0);`);
         lines.push(`        float wallSpot${num}Dist = length(pos - wallSpot${num}Pos);`);
-        const falloff = i === 2 ? '4.0' : '6.0';
-        const attenuation = i === 2 ? '0.06' : '0.05';
-        const intensity = i === 2 ? '0.6' : '0.8';
+        // Every light must declare its own cone and brightness. These were once
+        // chosen by list index (i === 2), so a light's shape depended on where
+        // it sat in WALL_SPOTLIGHTS and a new light silently inherited another
+        // light's settings. Name the missing field rather than failing with an
+        // undefined read halfway through shader generation.
+        for (const key of ['falloff', 'atten', 'intensity']) {
+            if (typeof spot[key] !== 'number') {
+                throw new Error(`WALL_SPOTLIGHTS entry ${Object.keys(WALL_SPOTLIGHTS)[i]} is missing ${key}`);
+            }
+        }
+        // toFixed(2) throughout - toFixed(1) silently rounded an intensity of
+        // 0.75 to 0.8, so a light did not get the value it declared.
+        const falloff = spot.falloff.toFixed(2);
+        const attenuation = spot.atten.toFixed(2);
+        const intensity = spot.intensity.toFixed(2);
         lines.push(`        wallSpot${num}Cone = pow(wallSpot${num}Cone, ${falloff}) / (1.0 + wallSpot${num}Dist * ${attenuation});`);
         lines.push(`        wallSpot += wallSpot${num}Cone * wallSpot${num}Diff * ${intensity};`);
         if (i < spots.length - 1) lines.push('');
@@ -402,8 +414,11 @@ const vec3 SPOTLIGHT_STEM_COLOR = vec3(0.02);
 // world units to texels using the region's world size and the texture's real
 // dimensions, then log2 to get a mip level.
 float wallTextLod(sampler2D tex, vec2 worldSize, vec3 nor, vec3 rd, float t) {
-    // World-space width of one pixel at the hit distance.
-    float pixelWorld = (2.0 * t / u_zoom) / u_resolution.y;
+    // World-space width of one pixel at the hit distance. The primary ray is
+    // built as normalize(camDir * 1.5 * zoom + uv), with uv normalized by
+    // resolution.y - so the focal length is 1.5 * zoom and one pixel subtends
+    // 1/(1.5 * zoom * resolution.y) radians.
+    float pixelWorld = t / (1.5 * u_zoom * u_resolution.y);
 
     // Stretch at grazing incidence. Clamped so a near-edge-on hit doesn't blow
     // the LOD out to the 1x1 mip.

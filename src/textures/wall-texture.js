@@ -32,38 +32,43 @@ export function createWallTexture(gl) {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#000000';
     ctx.font = '600 72px Georgia, serif';
-    ctx.fillText('TROIS FRACTALES', 1024, 80);
+    ctx.fillText('TROIS FRACTALES', 1024, 170);
 
     // Subtitle
     ctx.fillStyle = '#000000';
-    ctx.font = 'italic 32px Georgia, serif';
-    ctx.fillText('et Leurs Ombres Peintes', 1024, 145);
+    ctx.font = 'italic 38px Georgia, serif';
+    ctx.fillText('et Leurs Ombres Peintes', 1024, 242);
 
     // === SCULPTURE INFO BOXES ===
-    const boxWidth = 500;
-    const boxPadding = 30;
+    // The three panels sit on one row, sized alike. 500px was too narrow a
+    // measure for 32px French text - long words like "tridimensionnelle" forced
+    // very short lines next to full ones, giving a badly ragged right edge.
+    // 600 lets the wrap even out and drops the longest panel from 7 lines to 5.
+    const boxWidth = 600;
+    const boxHeight = 480;
+    const boxPadding = 34;
 
     const sculptures = [
         {
             title: 'MANDELBULB',
             subtitle: 'Galerie Ouest',
             desc: "Cette formule, créée en 2009, est une extension tridimensionnelle de l'ensemble de Mandelbrot. Elle produit des formes qui ressemblent au chou romanesco.",
-            x: 300,
-            y: 300
+            x: 120,
+            y: 472
         },
         {
             title: 'MANDELBOX',
             subtitle: 'Galerie Sud',
             desc: "Cette formule, découverte en 2010, ressemble à un labyrinthe de structures extraterrestres et peut se réduire à un seul point.",
-            x: 790,
-            y: 670
+            x: 724,
+            y: 472
         },
         {
             title: 'JULIA TRANCHE',
             subtitle: 'Galerie Est',
             desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes. Chaque tranche de tube évoque une fractale julia 2D.",
-            x: 1250,
-            y: 300
+            x: 1328,
+            y: 472
         }
     ];
 
@@ -75,32 +80,32 @@ export function createWallTexture(gl) {
 
         // Box background (subtle)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.0)';
-        ctx.fillRect(boxX, boxY, boxWidth, 380);
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
 
         // Box border
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(boxX, boxY, boxWidth, 380);
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
 
         // Title
         ctx.textAlign = 'left';
         ctx.fillStyle = '#000000';
-        ctx.font = '600 42px Georgia, serif';
-        ctx.fillText(sculpt.title, textX, boxY + 55);
+        ctx.font = '600 40px Georgia, serif';
+        ctx.fillText(sculpt.title, textX, boxY + 56);
 
         // Subtitle (gallery location)
         ctx.fillStyle = '#000000';
-        ctx.font = 'italic 26px Georgia, serif';
-        ctx.fillText(sculpt.subtitle, textX, boxY + 95);
+        ctx.font = 'italic 32px Georgia, serif';
+        ctx.fillText(sculpt.subtitle, textX, boxY + 104);
 
         // Description
         ctx.fillStyle = '#000000';
-        ctx.font = '26px Georgia, serif';
+        ctx.font = '32px Georgia, serif';
         const lines = wrapText(ctx, sculpt.desc, textWidth);
-        let y = boxY + 145;
+        let y = boxY + 160;
         for (const line of lines) {
             ctx.fillText(line, textX, y);
-            y += 38;
+            y += 44;
         }
 
 
@@ -109,14 +114,14 @@ export function createWallTexture(gl) {
     // === GENERAL DESCRIPTION - MIDDLE AREA ===
     ctx.textAlign = 'left';
     ctx.fillStyle = '#000000';
-    ctx.font = '24px Georgia, serif';
-    const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont des frontières dans cet espace mathématique. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
-    const generalLines = wrapText(ctx, generalDesc, 1200);
-    let generalY = 1140;
+    ctx.font = '30px Georgia, serif';
+    const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont les frontières de ces formules. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
+    const generalLines = wrapText(ctx, generalDesc, 1560);
+    let generalY = 1170;
 
     for (const line of generalLines) {
-        ctx.fillText(line, 450, generalY);
-        generalY += 34;
+        ctx.fillText(line, 244, generalY);
+        generalY += 42;
     }
 
     // === SIGNATURE - BOTTOM RIGHT ===
