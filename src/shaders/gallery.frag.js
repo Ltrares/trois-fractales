@@ -304,11 +304,15 @@ function generateMaterialHandling() {
             lines.push('');
             lines.push('            if (texUV.x >= 0.0 && texUV.x <= 1.0 && texUV.y >= 0.0 && texUV.y <= 1.0) {');
 
-            // Title wall uses textColor, code walls use codeColor
+            // Sample with an explicit LOD - see wallTextLod for why the
+            // implicit derivative-based mip fails on raymarched hits. The
+            // world size lets it convert a pixel footprint into texels.
+            const worldSize = `vec2(${xRange.toFixed(1)}, ${yRange.toFixed(1)})`;
+            lines.push(`                float lod = wallTextLod(${texName}, ${worldSize}, nor, rd, t);`);
             if (matId === MATERIAL_IDS.TITLE_WALL) {
-                lines.push(`                textColor = texture(${texName}, texUV);`);
+                lines.push(`                textColor = textureLod(${texName}, texUV, lod);`);
             } else {
-                lines.push(`                codeColor = texture(${texName}, texUV);`);
+                lines.push(`                codeColor = textureLod(${texName}, texUV, lod);`);
             }
             lines.push('            }');
         }
@@ -381,6 +385,39 @@ const float SPOTLIGHT_STEM_RADIUS = 0.015;
 const vec3 SPOTLIGHT_STEM_COLOR = vec3(0.02);
 
 // ============ BUMP MAPPING ============
+
+// Mip level for wall text, computed analytically instead of from derivatives.
+//
+// The implicit LOD that plain texture() would use comes from dFdx/dFdy of the
+// UV. That works for rasterized geometry, but here the UV is derived from a
+// raymarch hit position: neighbouring pixels in a quad can hit different
+// surfaces, or miss entirely, so the derivative spikes and the hardware picks a
+// far-too-coarse mip. The text turns to mush at some angles and distances and
+// stays sharp at others, which is what makes it read as inconsistent rather
+// than uniformly soft.
+//
+// Instead, derive the footprint directly. A pixel subtends a cone; at distance
+// t its width on a surface facing the camera is (2t/zoom)/resolution.y. A
+// grazing angle stretches that footprint along the surface, by 1/|N.V|. Convert
+// world units to texels using the region's world size and the texture's real
+// dimensions, then log2 to get a mip level.
+float wallTextLod(sampler2D tex, vec2 worldSize, vec3 nor, vec3 rd, float t) {
+    // World-space width of one pixel at the hit distance.
+    float pixelWorld = (2.0 * t / u_zoom) / u_resolution.y;
+
+    // Stretch at grazing incidence. Clamped so a near-edge-on hit doesn't blow
+    // the LOD out to the 1x1 mip.
+    float ndotv = max(abs(dot(nor, rd)), 0.15);
+    pixelWorld /= ndotv;
+
+    // Texels covered by that pixel, taking the denser axis.
+    vec2 texelsPerWorld = vec2(textureSize(tex, 0)) / worldSize;
+    float texels = pixelWorld * max(texelsPerWorld.x, texelsPerWorld.y);
+
+    // Bias slightly sharp: text tolerates a little aliasing far better than it
+    // tolerates being blurred away, and the TAA pass cleans up the residue.
+    return max(log2(texels) - 0.5, 0.0);
+}
 
 // Fast hash function (no sin/cos)
 float hash21(vec2 p) {
