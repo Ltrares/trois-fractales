@@ -3,6 +3,7 @@
 import { MOVE_SPEED, RUN_MULTIPLIER, MOUSE_SENS, STAND_HEIGHT, CROUCH_HEIGHT, CROUCH_SPEED } from '../utils/constants.js';
 import { isValidPosition } from './collision.js';
 import { showToast } from '../ui/toast.js';
+import { extendFreeze, cutFreezeShort } from '../ui/param-freeze.js';
 
 const CURSOR_HINT = 'Appuyez sur <kbd>\u00c9CHAP</kbd> pour lib\u00e9rer le curseur';
 const CURSOR_HINT_MS = 6000;
@@ -241,6 +242,13 @@ export class CameraController {
     _handleKeyDown(e) {
         this.keys[e.code] = true;
 
+        // ESC after a screenshot: don't make them wait out the whole freeze.
+        // The browser releases pointer lock on ESC itself; we only trim the
+        // parameter freeze so the scene is moving again shortly after resume.
+        if (e.code === 'Escape') {
+            cutFreezeShort();
+        }
+
         // Space or Enter resumes from pause (ESC can't resume due to browser conflicts)
         if ((e.code === 'Space' || e.code === 'Enter') && this.isPaused) {
             e.preventDefault();
@@ -277,6 +285,11 @@ export class CameraController {
                 this._pause();
                 this.screenshotManager.show();
             }
+        }
+
+        // Freeze fractal parameters so a screenshot can be framed
+        if (e.code === 'KeyP') {
+            extendFreeze();
         }
 
         // Toggle stats display

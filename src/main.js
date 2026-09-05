@@ -26,6 +26,7 @@ import { Camera } from './camera/camera.js';
 import { CameraController } from './camera/camera-controller.js';
 
 import { createSculptureAnimators, getFractalParams } from './fractals/fractal-animation.js';
+import { isFrozen, tickFreeze } from './ui/param-freeze.js';
 import { sampleMandelboxCoverage, getLastScanResults } from './fractals/fractal-config.js';
 
 import { StatsDisplay } from './ui/stats-display.js';
@@ -270,10 +271,17 @@ function render() {
     const rawJitter = cameraController.isPaused ? [0, 0] : getJitter();
     const jitter = [rawJitter[0] / camera.zoom, rawJitter[1] / camera.zoom];
 
-    // Pause animation updates when paused
-    const animTime = cameraController.isPaused ? lastAnimTime : now;
+    // Hold parameters still while paused, or while the visitor has frozen
+    // them with P to line up a shot (they can still move and look around).
+    // The freeze burns down on rendered time, so it only counts while the
+    // scene is actually on screen.
+    // Clamp the step: a backgrounded tab throttles rAF, and an unclamped dt
+    // would drain the whole freeze in a single catch-up frame.
+    tickFreeze(Math.min(dt, 0.1) * 1000);
+    const paramsHeld = cameraController.isPaused || isFrozen();
+    const animTime = paramsHeld ? lastAnimTime : now;
     const params = getFractalParams(sculptureAnimators, animTime, lastAnimTime);
-    if (!cameraController.isPaused) {
+    if (!paramsHeld) {
         lastAnimTime = now;
     }
 
@@ -447,8 +455,15 @@ function render() {
     mandelboxCoverage = sampleMandelboxCoverage(params.mandelbox);
     sculptureAnimators.mandelbox.setExternalDegeneracy(1.0 - mandelboxCoverage);
 
-    // Stagnation detection - if params haven't changed in 10s, pick new target
-    if (now - lastStagnationCheck > STAGNATION_CHECK_INTERVAL) {
+    // Stagnation detection - if params haven't changed in 10s, pick new target.
+    // Skipped while parameters are deliberately held: a freeze looks exactly
+    // like stagnation, and resetting would jump the sculpture to a new random
+    // state mid-screenshot. The timer is pushed forward so the check doesn't
+    // fire the instant the freeze lifts.
+    if (paramsHeld) {
+        lastStagnationCheck = now;
+        stagnationSnapshot = null;
+    } else if (now - lastStagnationCheck > STAGNATION_CHECK_INTERVAL) {
         const currentParams = params.mandelbox;
         if (stagnationSnapshot) {
             const diff = Math.abs(currentParams.scale - stagnationSnapshot.scale) +
