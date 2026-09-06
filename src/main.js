@@ -140,7 +140,6 @@ const juliaStampTexture = createJuliaTexture(gl, 1024);
 // Bake shadows for all surfaces
 function bakeShadows() {
     console.log(`Baking shadows (${SHADOW_TEX_SIZE}x${SHADOW_TEX_SIZE} x ${SHADOW_LAYERS} surfaces)...`);
-    const startTime = performance.now();
 
     fboManager.createShadowArray(SHADOW_TEX_SIZE, SHADOW_LAYERS);
 
@@ -169,8 +168,10 @@ function bakeShadows() {
     // Ensure GPU completes all shadow baking before continuing
     gl.finish();
 
-    const elapsed = (performance.now() - startTime).toFixed(0);
-    console.log(`Shadow baking complete! (${elapsed}ms)`);
+    // No timing here: gl.finish() is a hint rather than a hard barrier in
+    // browsers, so it returns before the GPU has really finished and any
+    // number measured around it reads far lower than the wait actually is.
+    console.log('Shadow baking complete!');
 }
 
 bakeShadows();
