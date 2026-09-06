@@ -643,7 +643,6 @@ function cleanup() {
     gl.deleteTexture(concreteTexture);
     gl.deleteTexture(peepholeTexture);
     gl.deleteTexture(juliaStampTexture);
-    // slideTextureManager.dispose();  // Slideshow disabled
     // Delete VAO and VBO
     gl.deleteBuffer(vbo);
     gl.deleteVertexArray(vao);
