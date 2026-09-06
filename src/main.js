@@ -651,7 +651,10 @@ function cleanup() {
 }
 
 window.addEventListener('beforeunload', cleanup);
-window.addEventListener('unload', cleanup);
+// pagehide rather than unload: Chrome blocks unload under Permissions Policy,
+// so that listener never ran and only logged a violation. pagehide also fires
+// on the mobile paths where beforeunload does not.
+window.addEventListener('pagehide', cleanup);
 // Also handle visibility change for mobile/tab switching
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
