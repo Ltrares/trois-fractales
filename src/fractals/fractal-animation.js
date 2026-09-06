@@ -3,20 +3,19 @@
 console.log('[init] fractal-animation.js executing...');
 
 import { EASING, catmullRom } from '../utils/easing.js';
-import { PARAM_RANGES, randomInRange, randomJuliaC, sampleMandelboxCoverage } from './fractal-config.js';
+import { PARAM_RANGES, randomInRange, randomJuliaC, sampleMandelboxCoverage, mandelboxOverflows } from './fractal-config.js';
+import { FRACTALS } from '../geometry/GalleryGeometry.js';
 
 export class WaypointAnimator {
     constructor(config) {
         this.generateWaypoint = config.generateWaypoint;
-        this.rate = config.rate || 0.0001;
+        this.rate = config.rate || 0.1;
         this.baseRate = this.rate;
         this.queueSize = Math.max(config.queueSize || 4, 4);
         this.easing = config.easing || EASING.linear;
         this.name = config.name || 'unnamed';
         this.useSpline = config.useSpline !== false;
         this.initialWaypoint = config.initialWaypoint || null;
-        this.externalDegeneracy = 0;  // Set via setExternalDegeneracy() from GPU sampling
-        this.degeneracySpeedup = config.degeneracySpeedup || 5.0;  // How much faster in degenerate regions
         this.paramRanges = config.paramRanges || null;  // For distance normalization
 
         this.waypoints = [];
@@ -102,22 +101,16 @@ export class WaypointAnimator {
         return catmullRom(p0, p1, p2, p3, t);
     }
 
-    update(dtMs) {
+    update(dt) {
         // Adaptive rate: slow near waypoints (t≈0,1), fast during transitions (t≈0.5)
         // More contrast: hover longer at waypoints, zip through middle
         // At t=0,1: 0.02, at t=0.5: 1.02 (ratio ~50x)
         let rateFactor = 0.02 + 4.0 * this.t * (1.0 - this.t);
 
-        // Speed up through degenerate parameter regions (from GPU coverage sampling)
-        // TEMPORARILY DISABLED - distance-based rate should handle this now
-        // if (this.externalDegeneracy > 0) {
-        //     rateFactor *= 1.0 + this.externalDegeneracy * (this.degeneracySpeedup - 1.0);
-        // }
-
         // Scale by segment distance: longer distances take proportionally longer
         // This keeps perceived velocity constant in parameter space
         const distanceScale = 1.0 / this.segmentDistance;
-        this.t += dtMs * this.rate * rateFactor * distanceScale;
+        this.t += dt * this.rate * rateFactor * distanceScale;
 
         while (this.t >= 1.0) {
             this.t -= 1.0;
@@ -152,12 +145,6 @@ export class WaypointAnimator {
         this.easing = easingFn;
     }
 
-    // Set degeneracy from external source (e.g., GPU coverage sampling)
-    // This overrides the internal heuristic when set
-    setExternalDegeneracy(value) {
-        this.externalDegeneracy = value;
-    }
-
     getDebugInfo() {
         return {
             name: this.name,
@@ -172,6 +159,17 @@ export class WaypointAnimator {
     }
 }
 
+// How much fractal space the hologram can actually show, in fractal units.
+// Derived from the display geometry so it tracks any change to either value.
+const DISPLAYABLE = FRACTALS.mandelbox.bboxHalf[0] / FRACTALS.mandelbox.scale;
+
+// A waypoint may reach this multiple of the displayable region before it is
+// rejected as mostly-clipped. 1.0 would demand the whole shape fit, which
+// discards two thirds of otherwise good parameters and loses the cross-section
+// look entirely; 2.0 keeps shapes that overflow moderately and drops the tail
+// that renders as a plain cube.
+const MAX_OVERFLOW_RATIO = 2.0;
+
 // Generate random mandelbox params, retrying until non-degenerate
 function randomNonDegenerateMandelbox() {
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -182,9 +180,11 @@ function randomNonDegenerateMandelbox() {
             foldLimit: randomInRange(PARAM_RANGES.mandelbox.foldLimit),
             rotation: [0, 0, 0]
         };
-        if (sampleMandelboxCoverage(params) > 0) {
-            return params;
-        }
+        // Cheap test first: is there anything there at all?
+        if (sampleMandelboxCoverage(params) === 0) continue;
+        // Then: is so much of it outside the display that it reads as a block?
+        if (mandelboxOverflows(params, DISPLAYABLE * MAX_OVERFLOW_RATIO)) continue;
+        return params;
     }
     // Fallback to known-good params
     return { scale: -1.5, minR: 0.5, fixedR: 1.0, foldLimit: 1.0, rotation: [0, 0, 0] };
@@ -197,15 +197,14 @@ export function createSculptureAnimators() {
     return {
         mandelbox: new WaypointAnimator({
             name: 'mandelbox',
-            rate: 0.00004,  // Base rate (scaled by segment distance) - 50% slower base
-            degeneracySpeedup: 20.0,  // 20x faster through degenerate regions
+            rate: 0.04,  // Base rate (scaled by segment distance) - 50% slower base
             paramRanges: PARAM_RANGES.mandelbox,  // For distance normalization
             initialWaypoint: randomNonDegenerateMandelbox(),
             generateWaypoint: randomNonDegenerateMandelbox
         }),
         mandelbulb: new WaypointAnimator({
             name: 'mandelbulb',
-            rate: 0.00001,
+            rate: 0.01,
             generateWaypoint: () => {
                 let newPower = lastMandelbulbPower + (Math.random() * 3 - 1.5);
                 newPower = Math.max(1.0, Math.min(12, newPower));
@@ -223,7 +222,7 @@ export function createSculptureAnimators() {
         }),
         julia: new WaypointAnimator({
             name: 'julia',
-            rate: 0.00005,
+            rate: 0.05,
             generateWaypoint: () => ({
                 c: randomJuliaC(),   // Use boundary-seeking generator for tubes
                 c2: randomJuliaC(),  // Both endpoints should be tube-producing
@@ -235,10 +234,9 @@ export function createSculptureAnimators() {
     };
 }
 
-// Get current fractal params from all animators
-export function getFractalParams(animators, time, lastAnimTime) {
-    const dt = lastAnimTime === null ? 16 : (time - lastAnimTime);
-
+// Advance every animator by dt (seconds) and return the current params.
+// Pass dt = 0 to sample without advancing, which is how a held frame is drawn.
+export function getFractalParams(animators, dt) {
     for (const key in animators) {
         animators[key].update(dt);
     }

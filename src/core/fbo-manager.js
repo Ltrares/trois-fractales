@@ -14,6 +14,15 @@ export class FBOManager {
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
 
+        // TSAA history: ping-pong pair. accumFBO[i] renders into accumTex[i];
+        // the pass reads the other one. RGBA8 like the rest of the chain --
+        // 8-bit feedback quantises, but a 1/16 blend moves a channel by ~16
+        // levels so it is well clear of the quantisation step.
+        this.accumFBO = [null, null];
+        this.accumTex = [null, null];
+        this.accumIdx = 0;
+        this.accumReset = true;
+
         // Shadow baking (2D texture array)
         this.shadowArrayFBO = null;
         this.shadowArrayTex = null;
@@ -52,6 +61,12 @@ export class FBOManager {
         if (this.galleryTextTex) gl.deleteTexture(this.galleryTextTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
+        for (let i = 0; i < 2; i++) {
+            if (this.accumFBO[i]) gl.deleteFramebuffer(this.accumFBO[i]);
+            if (this.accumTex[i]) gl.deleteTexture(this.accumTex[i]);
+            this.accumFBO[i] = null;
+            this.accumTex[i] = null;
+        }
 
 
         // Color texture - use RGBA8 (universally supported)
@@ -92,6 +107,21 @@ export class FBOManager {
         if (status !== gl.FRAMEBUFFER_COMPLETE) {
             console.error('Current frame FBO not complete:', status);
         }
+
+        // TSAA history pair. Any resize invalidates the accumulated image, so
+        // the next accumulate pass must start from scratch rather than blend
+        // against differently-shaped history.
+        for (let i = 0; i < 2; i++) {
+            this.accumTex[i] = this.createColorTexture(width, height);
+            this.accumFBO[i] = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.accumFBO[i]);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.accumTex[i], 0);
+            status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+            if (status !== gl.FRAMEBUFFER_COMPLETE) {
+                console.error('TSAA accum FBO', i, 'not complete:', status);
+            }
+        }
+        this.accumReset = true;
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
@@ -135,6 +165,12 @@ export class FBOManager {
         if (this.galleryDepthTex) gl.deleteTexture(this.galleryDepthTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
+        for (let i = 0; i < 2; i++) {
+            if (this.accumFBO[i]) gl.deleteFramebuffer(this.accumFBO[i]);
+            if (this.accumTex[i]) gl.deleteTexture(this.accumTex[i]);
+            this.accumFBO[i] = null;
+            this.accumTex[i] = null;
+        }
         if (this.shadowArrayFBO) gl.deleteFramebuffer(this.shadowArrayFBO);
         if (this.shadowArrayTex) gl.deleteTexture(this.shadowArrayTex);
 
@@ -144,6 +180,9 @@ export class FBOManager {
         this.galleryTextTex = null;
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
+        this.accumFBO = [null, null];
+        this.accumTex = [null, null];
+        this.accumReset = true;
         this.shadowArrayFBO = null;
         this.shadowArrayTex = null;
     }

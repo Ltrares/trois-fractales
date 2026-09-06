@@ -34,6 +34,22 @@ float sdBox(vec3 p, vec3 b) {
     return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
 }
 
+// Half-angle subtended by one pixel, taken from the ray construction below:
+// uv is normalised by u_resolution.y and the forward term is 1.5 * u_zoom, so a
+// one-pixel step in uv turns the ray by 1/(res.y * 1.5 * zoom) radians. No FOV
+// constant needed - the projection is fully described by the uniforms.
+float pixelAngle() {
+    return 1.0 / (u_resolution.y * 1.5 * u_zoom);
+}
+
+// Radius of the pixel's cone at ray distance t: the footprint the sample stands
+// for. A surface detail finer than this cannot be resolved, so marching to a
+// tighter epsilon than this resolves DE noise rather than visible geometry -
+// which is what blinks as the camera moves.
+float pixelFootprint(float t) {
+    return t * pixelAngle();
+}
+
 // Ray-AABB intersection (returns tmin, tmax or -1 if no hit)
 vec2 rayBoxIntersect(vec3 ro, vec3 rd, vec3 boxMin, vec3 boxMax) {
     vec3 invRd = 1.0 / rd;
@@ -284,11 +300,18 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
 import { mandelboxDE } from './fractals/mandelbox-de.js';
 import { mandelbulbDE } from './fractals/mandelbulb-de.js';
 import { juliaDE } from './fractals/julia-de.js';
-import { FRACTALS } from '../geometry/GalleryGeometry.js';
+import { glslFloat, FRACTALS } from '../geometry/GalleryGeometry.js';
 
 // Helper to format array for GLSL
 function toGLSL(arr) {
     return arr.map(v => v.toFixed(1)).join(', ');
+}
+
+// Surface epsilon that grows with the pixel's cone footprint at range t.
+// coneK is in pixel footprints; 0 (or absent) keeps the fixed MIN_DIST.
+function coneEpsilon(coneK) {
+    if (!coneK) return 'MIN_DIST';
+    return `max(MIN_DIST, ${glslFloat(coneK)} * t / (u_resolution.y * 1.5 * u_zoom))`;
 }
 
 const mbx = FRACTALS.mandelbox;
@@ -296,7 +319,7 @@ export const mandelboxShaderSrc = buildFractalShader(
     mandelboxDE, '',
     toGLSL(mbx.position),
     toGLSL(mbx.bboxHalf),
-    mbx.scale.toFixed(1),
+    glslFloat(mbx.scale),
     'mix(vec3(0.25, 0.2, 0.2), vec3(0.89, 0.89, 0.90), iterProxy)',
     toGLSL(mbx.spotlightOffset),
     '0.23',  // specMult - reduced specular
@@ -305,6 +328,22 @@ export const mandelboxShaderSrc = buildFractalShader(
     {
         skipSelfShadow: false,
         skipAO: true,
+        // Cone-traced hit threshold: widen the surface epsilon with distance so
+        // a sample stands for the pixel footprint it actually covers.
+        //
+        // A fixed MIN_DIST resolves detail finer than a pixel can display, so
+        // whether a given micro-feature falls inside the epsilon flips as the
+        // camera moves and the pixel blinks - the distance sparkle. The pixel's
+        // half-angle comes from the ray construction below: uv is normalised by
+        // u_resolution.y and the forward term is 1.5 * u_zoom, so one pixel
+        // subtends 1/(res.y * 1.5 * zoom) radians, and its footprint at range t
+        // is t times that. RENDER_QUALITY scales u_resolution, so this follows
+        // the actual pixel size rather than a fixed assumption.
+        //
+        // max() keeps MIN_DIST near the sculpture, where a pixel is finer than
+        // 0.002 world units, so close-up detail is unchanged. The crossover at
+        // 1080p is around 3 units; the gallery viewing distance is about 7.
+        hitEpsilon: coneEpsilon(mbx.coneK),
         fogMiss: `// Fog: blend toward surface gray for rays that got lost
         float fogAmount = float(stepsTaken) / float(MAX_STEPS);
         fogAmount = smoothstep(0.7, 1.0, fogAmount);
@@ -340,7 +379,7 @@ export const mandelbulbShaderSrc = buildFractalShader(
     mandelbulbDE, '',
     toGLSL(mbl.position),
     toGLSL(mbl.bboxHalf),
-    mbl.scale.toFixed(1),
+    glslFloat(mbl.scale),
     'mix(vec3(0.02, 0.1, 0.02), vec3(0.3, 0.7, 0.2), 0.5 + 0.5 * cos(6.28 * g_bulbIter))',
     toGLSL(mbl.spotlightOffset),
     '1.0',   // specMult
@@ -361,7 +400,7 @@ export const juliaShaderSrc = buildFractalShader(
     juliaDE, '',
     toGLSL(jul.position),
     '0.8, 0.8, 0.8',  // smaller bbox for cross-sections
-    jul.scale.toFixed(1),
+    glslFloat(jul.scale),
     '0.5 + 0.5 * cos(3.14 * (g_juliaIter + vec3(0.23, 0.53, 0.87)))',  // cosine palette
     toGLSL(jul.spotlightOffset),
     '0.27',   // specMult - reduced for less shiny look

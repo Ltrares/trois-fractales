@@ -10,6 +10,10 @@ out vec4 fragColor;
 uniform sampler2D u_texture;
 uniform sampler2D u_textLayer;  // Text layer for post-FXAA compositing
 uniform vec2 u_resolution;
+// 0 bypasses the edge filter and passes the image through untouched, still
+// compositing the text. For evaluating TSAA on its own: judging an accumulated
+// image through FXAA measures the pair, not the accumulator.
+uniform int u_fxaaOn;
 
 // FXAA quality settings
 const float FXAA_REDUCE_MIN = 1.0 / 128.0;
@@ -24,6 +28,13 @@ float luma(vec3 rgb) {
 void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution;
     vec2 texelSize = 1.0 / u_resolution;
+
+    if (u_fxaaOn == 0) {
+        vec4 t = texture(u_textLayer, uv);
+        vec3 r = mix(texture(u_texture, uv).rgb, t.rgb, t.a);
+        fragColor = vec4(r, 1.0);
+        return;
+    }
 
     // Sample center and 4 corners
     vec3 rgbNW = texture(u_texture, uv + vec2(-1.0, -1.0) * texelSize).rgb;
@@ -83,10 +94,10 @@ void main() {
     // Composite text on top AFTER FXAA (keeps text crisp but not razor-sharp)
     vec4 text = texture(u_textLayer, uv);
 
-    // Soften text alpha slightly to avoid overly harsh edges
-    // This preserves the anti-aliasing from the texture while avoiding FXAA artifacts
-    float softAlpha = text.a * 0.65;
-    vec3 result = mix(fxaaResult, text.rgb, softAlpha);
+    // The alpha already carries the 0.9 blend weight from the gallery pass, and
+    // the glyph texture supplies its own anti-aliased edges. Attenuating again
+    // here would only make the text washed out, not smoother.
+    vec3 result = mix(fxaaResult, text.rgb, text.a);
 
     fragColor = vec4(result, 1.0);
 }`;

@@ -9,11 +9,11 @@
 // pause menu, the gallery, a backgrounded tab - does not burn down the freeze,
 // so the visitor gets the full duration of actual viewing they asked for.
 
-const FREEZE_MS = 30000;
-const ESCAPE_MS = 5000;   // ESC cuts a long freeze short after a screenshot
+const FREEZE_S = 30;
+const ESCAPE_S = 5;   // ESC cuts a long freeze short after a screenshot
 
 let el = null;
-let remaining = 0;        // ms of render time left; 0 means not frozen
+let remaining = 0;        // seconds of render time left; 0 means not frozen
 
 function ensureEl() {
     if (!el) {
@@ -32,25 +32,25 @@ function paint() {
     }
     // Round up so the label reads the full duration the instant it appears and
     // only reaches "1 s" during the final second.
-    el.textContent = `Paramètres figés — ${Math.ceil(remaining / 1000)} s`;
+    el.textContent = `Paramètres figés — ${Math.ceil(remaining)} s`;
 }
 
 /**
  * Advance the freeze by one rendered frame. Called from the render loop, which
  * only runs while the scene is actually being drawn.
- * @param {number} dtMs - elapsed render time for this frame
+ * @param {number} dt - elapsed render time for this frame, in seconds
  */
-export function tickFreeze(dtMs) {
+export function tickFreeze(dt) {
     if (remaining <= 0) return;
-    remaining = Math.max(0, remaining - dtMs);
+    remaining = Math.max(0, remaining - dt);
     paint();
 }
 
 /**
  * Freeze parameters, restarting the countdown if already frozen.
- * @param {number} duration - ms of render time to hold (tests override this)
+ * @param {number} duration - seconds of render time to hold (tests override this)
  */
-export function extendFreeze(duration = FREEZE_MS) {
+export function extendFreeze(duration = FREEZE_S) {
     const node = ensureEl();
     remaining = duration;
     node.classList.add('visible');
@@ -62,6 +62,18 @@ export function isFrozen() {
 }
 
 /**
+ * End the freeze immediately. P extends the hold and ESC trims it to a short
+ * tail; this is the direct release, for a visitor who is done framing and wants
+ * the scene moving again now rather than in five seconds.
+ * Harmless if parameters aren't frozen.
+ */
+export function clearFreeze() {
+    if (!isFrozen()) return;
+    remaining = 0;
+    paint();
+}
+
+/**
  * Shorten an active freeze to a brief tail, so leaving via ESC gets the
  * visitor back to a moving scene quickly instead of waiting out the timer.
  * A freeze already shorter than the tail is left alone, and nothing happens
@@ -69,8 +81,8 @@ export function isFrozen() {
  */
 export function cutFreezeShort() {
     if (!isFrozen()) return;
-    if (ESCAPE_MS < remaining) {
-        remaining = ESCAPE_MS;
+    if (ESCAPE_S < remaining) {
+        remaining = ESCAPE_S;
         paint();
     }
 }

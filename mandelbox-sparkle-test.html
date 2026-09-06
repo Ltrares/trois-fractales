@@ -44,7 +44,7 @@
 </div>
 
 <div id="controls">
-  <label>dist <input type="range" id="dist" min="1.4" max="14" step="0.05" value="7">
+  <label>dist <input type="range" id="dist" min="1.4" max="40" step="0.05" value="7">
     <span class="val" id="distV">7.00</span></label>
   <label>orbit <input type="range" id="orbit" min="0" max="6.283" step="0.001" value="0.6">
     <span class="val" id="orbitV">0.60</span></label>
@@ -64,11 +64,14 @@
   <button id="accum" class="on">accum: on</button>
   <button id="diag">diag: off</button>
   <label title="ghost tail while the camera moves, in milliseconds">tail ms
-    <input type="range" id="movems" min="30" max="600" step="10" value="150">
-    <span class="val" id="movemsV">150</span></label>
+    <input type="range" id="movems" min="0" max="600" step="1" value="30">
+    <span class="val" id="movemsV">30</span></label>
   <label title="samples the mean stops at when parked; higher = stiller, slower to recover">rest n
-    <input type="range" id="restcap" min="16" max="1024" step="16" value="128">
-    <span class="val" id="restcapV">128</span></label>
+    <input type="range" id="restcap" min="8" max="1024" step="8" value="16">
+    <span class="val" id="restcapV">16</span></label>
+  <label title="scatter that reads as full red in the sparkle map">diag scale
+    <input type="range" id="diagsc" min="0.005" max="0.2" step="0.005" value="0.05">
+    <span class="val" id="diagscV">0.050</span></label>
   <label title="sub-pixel jitter radius in pixels; 0 = sample pixel centre only">jitter
     <input type="range" id="jit" min="0" max="0.5" step="0.01" value="0.5">
     <span class="val" id="jitV">0.50</span></label>
@@ -124,20 +127,24 @@ const VARIANTS = {
     opts: { ...BASE },
   },
   B: {
-    // Progressive accumulation: jittered sub-pixel samples, 1/n running mean.
-    // No reprojection and no neighbourhood clamp -- neither is implemented here.
-    // Jitter is applied on the CPU as a sub-pixel camera offset (u_jitter),
-    // history is reprojected by world-position, and the clamp rejects history
-    // that falls outside the current 3x3 colour range -- the piece the old
-    // implementation lacked, which is why it smeared.
-    name: 'accumulate  (sub-pixel jitter, 1/n mean)',
-    // alpha carries ray distance t, so a future reprojection could reconstruct the world
-    // position of each hit without a second render target.
-    // alphaOut: hits carry ray distance t. alphaMiss: fog/miss pixels carry a
-    // negative sentinel so the resolve rejects them instead of reconstructing
-    // a world position from a t that never corresponded to a surface.
-    opts: { ...BASE, alphaOut: 't', alphaMiss: '-1.0' },
-    accum: true,
+    // Identical to A but for the hit threshold: B widens it with distance so a
+    // sample stands for the pixel it actually covers.
+    //
+    // A marches to a fixed MIN_DIST (0.002) at every range. A pixel at 7 units
+    // subtends far more than 0.002 world units, so A resolves detail finer than
+    // it can display: whether a given micro-feature is inside the epsilon flips
+    // as the camera moves, and the pixel blinks. That is the distance sparkle.
+    //
+    // B takes max(MIN_DIST, pixelFootprint(t) * coneK) - the cone radius at the
+    // hit distance - so near the camera it behaves exactly like A and only
+    // loosens where a pixel is genuinely wider than the detail. coneK is the
+    // slider, so 1.0 is one pixel of footprint and 0 reverts B to A.
+    name: 'cone hit epsilon  (only change)',
+    uniforms: 'uniform float u_coneK;',
+    // Inlined rather than calling the template's pixelFootprint(): the
+    // expression is substituted into this variant's own shader, so it does not
+    // depend on the helper existing in a separately-cached module.
+    opts: { ...BASE, hitEpsilon: 'max(MIN_DIST, t * u_coneK / (u_resolution.y * 1.5 * u_zoom))' },
   },
 };
 
@@ -166,8 +173,12 @@ function makePane(canvasId, variant) {
 
   const opts = { ...variant.opts };
   if (SHOW_NORMALS) opts.debugNormals = true;
+  // The hologram volume (bboxHalf) is fixed by the room - it is the space the
+  // sculpture physically occupies on its pedestal. A variant changes only
+  // FRACTAL_SCALE, which sets how much fractal space maps into that volume.
+  const fractalScale = (variant.fractalScale ?? mbx.scale).toFixed(3);
   const fragSrc = buildFractalShader(
-    mandelboxDE, variant.uniforms || '', g(mbx.position), g(mbx.bboxHalf), mbx.scale.toFixed(1),
+    mandelboxDE, variant.uniforms || '', g(mbx.position), g(mbx.bboxHalf), fractalScale,
     'mix(vec3(0.25, 0.2, 0.2), vec3(0.89, 0.89, 0.90), iterProxy)',
     g(mbx.spotlightOffset), '0.23', variant.specExp || '32.0', '20', opts
   );
@@ -292,17 +303,32 @@ uniform float u_wAge;         // 1/n running mean
 uniform int   u_reset;
 out vec4 fragColor;
 
+// alpha carries the running mean of |cur - hist|: how far a fresh sample
+// typically lands from where this pixel has settled. Read by the sparkle map
+// (diag: sparkle) and by __scatterProbe; it does not affect the image.
+//
+// TRIED AND REJECTED (2026-09-05): using this scatter as a per-pixel gate --
+// boost the blend weight toward 1 when a sample is an outlier against it, so
+// changed pixels respond fast while settled ones keep accumulating, replacing
+// the global camera-speed heuristic. It does not work on this content. Measured
+// at rest, ratio |cur-hist|/scatter has mean ~1.05 and max 7-12, so any
+// threshold low enough to catch real change also fires constantly on ordinary
+// at-rest scatter -- the rest and motion distributions overlap. More
+// fundamentally, the user reports the scatter map bears little relation to
+// visible sparkle, so this quantity is not measuring the thing it would need to
+// measure. Do not rebuild it on scatter without first establishing what
+// visible sparkle actually correlates with.
 void main() {
     vec2 uv = gl_FragCoord.xy / u_res;
     vec4 c4  = texture(u_cur, uv);
     vec3 cur = c4.rgb;
-    float t  = c4.a;
 
-    if (u_reset == 1) { fragColor = vec4(cur, t); return; }
+    if (u_reset == 1) { fragColor = vec4(cur, 0.0); return; }
 
     // Same pixel, every time. Hits and misses alike -- neither has parallax
     // relative to a fragment-space jitter.
-    vec3 hist = texture(u_hist, uv).rgb;
+    vec4  h4   = texture(u_hist, uv);
+    vec3  hist = h4.rgb;
 
     // No neighbourhood clamp. A clamp exists to reject history that
     // reprojection dragged in from somewhere else; with an in-place fetch the
@@ -311,7 +337,12 @@ void main() {
     // accumulator: its bounds were the 3x3 range of a single jittered sample,
     // rebuilt every frame, so it kept dragging the converged mean back toward
     // that frame's noise.)
-    fragColor = vec4(mix(hist, cur, u_wAge), t);
+    float scatter = h4.a;
+    float diff    = length(cur - hist);
+
+    float ns = mix(scatter, diff, u_wAge);
+
+    fragColor = vec4(mix(hist, cur, u_wAge), ns);
 }`;
     const tp = gl.createProgram();
     gl.attachShader(tp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'accum-vert'));
@@ -341,11 +372,37 @@ uniform sampler2D u_src;    // history just written this frame
 uniform sampler2D u_prev;   // history as of last frame
 uniform vec2 u_res;
 uniform int u_diag;
+uniform float u_diagScale;  // scatter value that reads as full red
 out vec4 fragColor;
 void main() {
     vec2 uv = gl_FragCoord.xy / u_res;
     vec4 c = texture(u_src, uv);
     if (u_diag == 0) { fragColor = vec4(c.rgb, 1.0); return; }
+
+    if (u_diag == 2) {
+        // SPARKLE MAP. Alpha carries the running mean of |sample - mean|: how
+        // far a fresh sample typically lands from where this pixel has settled.
+        // That IS sparkle, already measured per pixel and accumulated over the
+        // window -- not a frame-to-frame difference, so it shows the persistent
+        // troublemakers rather than whatever twitched this instant.
+        //
+        // CAVEAT: this cannot separate sparkle from honest detail. A pixel on a
+        // genuinely sharp edge has high scatter for a legitimate reason -- the
+        // jitter is resolving real sub-pixel structure. Both light up here.
+        float sc = texture(u_src, uv).a;
+        // Blue -> green -> red as scatter rises. u_diagScale sets what counts as
+        // "hot": at 0.05 a red pixel is scattering ~5% of full scale per sample.
+        float x = clamp(sc / u_diagScale, 0.0, 1.0);
+        vec3 col = x < 0.5
+            ? mix(vec3(0.0, 0.1, 0.45), vec3(0.0, 0.85, 0.2), x * 2.0)
+            : mix(vec3(0.0, 0.85, 0.2), vec3(1.0, 0.15, 0.0), (x - 0.5) * 2.0);
+        // Blown past the scale entirely -- white, so a saturated red region is
+        // distinguishable from an off-the-chart one.
+        if (x >= 1.0) col = vec3(1.0);
+        fragColor = vec4(col, 1.0);
+        return;
+    }
+
     // How much did the DISPLAYED pixel actually move since last frame? That is
     // the sparkle, measured directly on the output. Amplified 20x so small
     // per-frame changes are visible; grey = perfectly still.
@@ -359,7 +416,8 @@ void main() {
     gl.linkProgram(sp);
     pane.showProg = sp;
     pane.showLocs = { src: gl.getUniformLocation(sp, 'u_src'), prev: gl.getUniformLocation(sp, 'u_prev'),
-                      res: gl.getUniformLocation(sp, 'u_res'), diag: gl.getUniformLocation(sp, 'u_diag') };
+                      res: gl.getUniformLocation(sp, 'u_res'), diag: gl.getUniformLocation(sp, 'u_diag'),
+                      diagScale: gl.getUniformLocation(sp, 'u_diagScale') };
     const spos = gl.getAttribLocation(sp, 'a_position');
     gl.enableVertexAttribArray(spos);
     gl.vertexAttribPointer(spos, 2, gl.FLOAT, false, 0, 0);
@@ -419,13 +477,17 @@ void main() {
 const target = mbx.position.slice();
 const cam = { dist: 7, orbit: 0.6, height: 0.4 };
 let WOBBLE = false, SHOW_NORMALS = false, RES = 1, SS = 1;
-let ACCUM_ON = true, ACCUM_JIT = 0.5, ACCUM_DIAG = false, accumFrame = 0;
+let ACCUM_ON = true, ACCUM_JIT = 0.5, ACCUM_DIAG = 0, accumFrame = 0;
+// Scatter value that reads as full red in the sparkle map. Measured mean on this
+// scene is ~4.5e-2, so 0.05 puts the typical pixel near the top of the ramp.
+let DIAG_SCALE = 0.05;
 // Accumulation window. REST_CAP is the sample count the mean stops at when
 // parked (measured: converged well before 128 on this scene). MOVE_MS is how
 // long the ghost tail lasts while moving, in milliseconds -- 100-300ms is the
 // useful range. MOVE_FULL is the camera speed at which the short cap is fully
 // applied; CAP_RISE is the per-frame fraction of the way back up once stopped.
-let REST_CAP = 128, MOVE_MS = 150, MOVE_FULL = 0.02, CAP_RISE = 0.08;
+let REST_CAP = 16, MOVE_MS = 30, MOVE_FULL = 0.02, CAP_RISE = 0.08;
+
 
 // Halton(2,3) low-discrepancy sequence for sub-pixel jitter, evaluated per frame
 // rather than read from a fixed table.
@@ -689,7 +751,11 @@ function drawAccum(pane, basis, W, H) {
   const now = performance.now();
   const dt = pane.prevT ? Math.min(100, now - pane.prevT) : 16.7;
   pane.prevT = now;
-  const moveCap = Math.max(2, MOVE_MS / dt);          // ms -> frames, at the real rate
+  // ms -> frames at the measured rate. Floor of 1, not 2: a cap of 1 means
+  // weight 1/1 = take the current sample whole, i.e. no accumulation at all
+  // while moving. That is the tail=0 end of the slider and it needs to be
+  // reachable -- clamping to 2 made 0, 17 and 33ms all behave identically.
+  const moveCap = Math.max(1, MOVE_MS / dt);
   const k = Math.min(1, speed / MOVE_FULL);
   // Drop to the short cap immediately on movement, ease back up when it stops:
   // an instant return would start converging from a buffer still full of ghost,
@@ -713,11 +779,43 @@ function drawAccum(pane, basis, W, H) {
   // src is the history written this frame; prev is the one it was blended from.
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, src);
   gl.uniform1i(pane.showLocs.prev, 1);
-  gl.uniform1i(pane.showLocs.diag, ACCUM_DIAG ? 1 : 0);
+  gl.uniform1i(pane.showLocs.diag, ACCUM_DIAG);
+  gl.uniform1f(pane.showLocs.diagScale, DIAG_SCALE);
   gl.uniform2f(pane.showLocs.res, W, H);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   pane.histIdx ^= 1;
+
+  // __scatterProbe: report the per-pixel scatter distribution -- how far a fresh
+  // sample typically lands from the accumulated mean. Set window.__scatterProbe
+  // = true. NOTE this does not correlate with visible sparkle (user-verified);
+  // it is a measurement of sample spread, kept because it is cheap and because
+  // whatever does explain sparkle has to be consistent with these numbers.
+  if (window.__scatterProbe && (pane.age % 30 === 0)) {
+    const N = 128;
+    const n = Math.min(N, W, H);
+    const cx = Math.max(0, Math.floor(W / 2) - n / 2), cy = Math.max(0, Math.floor(H / 2) - n / 2);
+    const hb = new Float32Array(4 * n * n), cb = new Float32Array(4 * n * n);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fboHist);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+    gl.readPixels(cx, cy, n, n, gl.RGBA, gl.FLOAT, hb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pane.cur, 0);
+    gl.readPixels(cx, cy, n, n, gl.RGBA, gl.FLOAT, cb);
+    const px = n * n;
+    let sSum = 0, sMax = 0, dSum = 0, hot = 0;
+    for (let i = 0; i < px; i++) {
+      const sc = hb[i*4+3];
+      let d = 0;
+      for (let c = 0; c < 3; c++) d += (cb[i*4+c] - hb[i*4+c]) ** 2;
+      dSum += Math.sqrt(d);
+      sSum += sc; sMax = Math.max(sMax, sc);
+      if (sc > DIAG_SCALE) hot++;
+    }
+    console.log(`[scatter] age ${pane.age} restN ${Math.min(pane.age, pane.cap).toFixed(0)}`,
+      `| scatter mean ${(sSum/px).toExponential(2)} max ${sMax.toExponential(2)}`,
+      `| this-frame |cur-hist| mean ${(dSum/px).toExponential(2)}`,
+      `| above diag scale ${(100*hot/px).toFixed(1)}%`);
+  }
 
   // __accumStability: with the camera parked, measure how much the DISPLAYED
   // image actually changes frame to frame. This is the number that matters --
@@ -988,6 +1086,7 @@ document.getElementById('normals').addEventListener('click', e => {
   };
   mk('movems',  v => MOVE_MS  = v, v => String(v));
   mk('restcap', v => REST_CAP = v, v => String(v));
+  mk('diagsc',  v => DIAG_SCALE = v, v => v.toFixed(3));
 }
 document.getElementById('accum').addEventListener('click', e => {
   ACCUM_ON = !ACCUM_ON;
@@ -997,9 +1096,10 @@ document.getElementById('accum').addEventListener('click', e => {
   resetStats();
 });
 document.getElementById('diag').addEventListener('click', e => {
-  ACCUM_DIAG = !ACCUM_DIAG;
-  e.target.textContent = 'diag: ' + (ACCUM_DIAG ? 'on' : 'off');
-  e.target.classList.toggle('on', ACCUM_DIAG);
+  // off -> change (frame-to-frame) -> sparkle (accumulated scatter) -> off
+  ACCUM_DIAG = (ACCUM_DIAG + 1) % 3;
+  e.target.textContent = 'diag: ' + ['off', 'change', 'sparkle'][ACCUM_DIAG];
+  e.target.classList.toggle('on', ACCUM_DIAG !== 0);
 });
 
 document.getElementById('ss').addEventListener('click', e => {
@@ -1032,7 +1132,9 @@ addEventListener('mousemove', e => {
   syncCam();
 });
 document.getElementById('panes').addEventListener('wheel', e => {
-  cam.dist = Math.max(1.4, Math.min(14, cam.dist + e.deltaY * 0.004));
+  // Step scales with current distance: a fixed increment that feels right up
+  // close crawls once the unclipped fractal is framed at 30+ units out.
+  cam.dist = Math.max(1.4, Math.min(40, cam.dist + e.deltaY * 0.004 * cam.dist));
   syncCam(); e.preventDefault();
 }, { passive: false });
 </script>

@@ -71,6 +71,7 @@ export class ShaderManager {
         const gl = this.gl;
         return {
             resolution: gl.getUniformLocation(prog, 'u_resolution'),
+            jitter: gl.getUniformLocation(prog, 'u_jitter'),
             camPos: gl.getUniformLocation(prog, 'u_camPos'),
             camDir: gl.getUniformLocation(prog, 'u_camDir'),
             camRight: gl.getUniformLocation(prog, 'u_camRight'),
@@ -105,7 +106,6 @@ export class ShaderManager {
             // Animated slides texture
             slidesTex: gl.getUniformLocation(prog, 'u_slidesTex'),
             // Time for animation
-            time: gl.getUniformLocation(prog, 'u_time'),
         };
     }
 

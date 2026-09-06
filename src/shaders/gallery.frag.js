@@ -2,7 +2,7 @@ console.log('[init] gallery.frag.js executing...');
 // Gallery-only shader (Pass 1)
 // Outputs: color to attachment 0, ray distance to attachment 1
 
-import {
+import { glslFloat,
     FRACTALS,
     FRACTAL_SPOTLIGHTS,
     WALLS,
@@ -44,7 +44,7 @@ function generateFractalConstants() {
         } else {
             lines.push(`const vec3 ${upper}_BBOX = ${vec3(bbox)};`);
         }
-        lines.push(`const float ${upper}_SCALE = ${f.scale.toFixed(1)};`);
+        lines.push(`const float ${upper}_SCALE = ${glslFloat(f.scale)};`);
     }
     return lines.join('\n');
 }
@@ -341,12 +341,16 @@ layout(location = 1) out vec4 outDepth;
 layout(location = 2) out vec4 outText;  // Text layer for post-FXAA compositing
 
 uniform vec2 u_resolution;
+// Sub-pixel sample offset in pixels, shared with the fractal passes. The
+// gallery is its own raymarch with the same camera, so it must take the SAME
+// offset -- jittering only the fractals would shimmer them against a rock-steady
+// gallery and show up as a seam at every boundary.
+uniform vec2 u_jitter;
 uniform vec3 u_camPos;
 uniform vec3 u_camDir;
 uniform vec3 u_camRight;
 uniform vec3 u_camUp;
 uniform float u_zoom;
-uniform float u_time;
 
 // Fractal parameters for shadow casting
 uniform float u_mandelboxScale;
@@ -706,28 +710,9 @@ float getBakedShadow(int shadowId, vec3 worldPos) {
     return texture(u_shadowArrayTex, vec3(uv, float(shadowId))).r;
 }
 
-vec3 flowingWater(vec3 rd) {
-    vec2 p = rd.xz / (1.0 + abs(rd.y)) * 3.0;
-    float t = u_time * 0.3;
-    float wave1 = sin(p.x * 2.0 + t) * sin(p.y * 2.0 + t * 0.7);
-    float wave2 = sin(p.x * 4.0 - t * 1.3 + 1.0) * sin(p.y * 3.0 + t * 0.9);
-    float wave3 = sin(p.x * 7.0 + t * 0.8) * sin(p.y * 6.0 - t * 1.1);
-    float waves = wave1 * 0.5 + wave2 * 0.3 + wave3 * 0.2;
-    waves = waves * 0.5 + 0.5;
-    vec3 deep = vec3(0.02, 0.05, 0.12);
-    vec3 mid = vec3(0.05, 0.15, 0.25);
-    vec3 bright = vec3(0.1, 0.3, 0.4);
-    float viewFade = smoothstep(-0.3, 0.3, rd.y);
-    vec3 water = mix(deep, mid, waves);
-    water = mix(water, bright, waves * waves * viewFade);
-    float caustic = sin(p.x * 12.0 + t * 2.0) * sin(p.y * 12.0 - t * 1.7);
-    caustic = pow(max(caustic, 0.0), 3.0) * 0.15;
-    water += vec3(caustic * 0.5, caustic * 0.8, caustic);
-    return water;
-}
 
 void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
+    vec2 uv = (gl_FragCoord.xy + u_jitter - 0.5 * u_resolution) / u_resolution.y;
     vec3 ro = u_camPos;
     vec3 rd = normalize(u_camDir * 1.5 * u_zoom + uv.x * u_camRight + uv.y * u_camUp);
 
@@ -951,11 +936,16 @@ ${generateMaterialHandling()}
         }
     }
 
-    // Blend text directly into color (will be subject to FXAA)
-    col = mix(col, textColor.rgb, textColor.a * 0.9);
-
     col = pow(col, vec3(0.4545));
     outColor = vec4(col, 1.0);
     outDepth = vec4(hitDist / 100.0, 0.0, 0.0, 1.0);
-    outText = vec4(0.0);  // Text now blended into color, not separate layer
+
+    // Text goes out on its own attachment rather than into the colour, so the
+    // FXAA pass can composite it afterwards and leave the glyph edges alone.
+    // Blending it into col here meant it was filtered along with the geometry,
+    // which is what made text soft whenever FXAA was on - the separate layer
+    // existed for exactly this but was being written as zero.
+    // Gamma is applied here because the colour it will be mixed over has
+    // already been corrected by the line above.
+    outText = vec4(pow(textColor.rgb, vec3(0.4545)), textColor.a * 0.9);
 }`;

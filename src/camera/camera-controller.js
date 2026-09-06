@@ -3,7 +3,7 @@
 import { MOVE_SPEED, RUN_MULTIPLIER, MOUSE_SENS, STAND_HEIGHT, CROUCH_HEIGHT, CROUCH_SPEED } from '../utils/constants.js';
 import { isValidPosition } from './collision.js';
 import { showToast } from '../ui/toast.js';
-import { extendFreeze, cutFreezeShort } from '../ui/param-freeze.js';
+import { extendFreeze, cutFreezeShort, clearFreeze } from '../ui/param-freeze.js';
 
 const CURSOR_HINT = 'Appuyez sur <kbd>\u00c9CHAP</kbd> pour lib\u00e9rer le curseur';
 const CURSOR_HINT_MS = 6000;
@@ -23,6 +23,11 @@ export class CameraController {
         this.screenshotManager = null;
         this.statsElement = null;
         this.onResume = null;  // Callback when resuming from pause
+        // Callback for a discontinuous change to the scene, as opposed to the
+        // continuous morph between waypoints. Any temporal accumulation has to
+        // be dropped: it averages frames on the assumption they show the same
+        // thing, which a jump violates.
+        this.onSceneJump = null;
 
         // Mobile/touch support
         this.isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || !('pointerLockElement' in document);
@@ -265,11 +270,14 @@ export class CameraController {
             this.camera.setZoomTarget(5.0);
         }
 
-        // Randomize all fractals
+        // Randomize all fractals. reset() replaces the whole waypoint queue, so
+        // the sculptures jump rather than morph - accumulated history is of a
+        // different shape and has to go, or the old one ghosts through it.
         if (e.code === 'KeyR' && this.sculptureAnimators) {
             for (const key in this.sculptureAnimators) {
                 this.sculptureAnimators[key].reset();
             }
+            if (this.onSceneJump) this.onSceneJump();
         }
 
         // Screenshot capture
@@ -290,6 +298,12 @@ export class CameraController {
         // Freeze fractal parameters so a screenshot can be framed
         if (e.code === 'KeyP') {
             extendFreeze();
+        }
+
+        // Release the freeze now. P only ever extends the hold, so without this
+        // the only way out is to wait the timer down or trim it with ESC.
+        if (e.code === 'KeyO') {
+            clearFreeze();
         }
 
         // Toggle stats display

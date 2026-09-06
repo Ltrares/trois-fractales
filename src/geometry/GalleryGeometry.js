@@ -11,13 +11,38 @@ export const WALL_THICKNESS = 0.3;
 
 // ============ FRACTALS ============
 
+// GLSL has no implicit int->float conversion, so a baked literal must carry a
+// decimal point: `float x = 2;` is a compile error. toFixed(1) used to supply
+// that, at the cost of rounding anything finer than one decimal. This keeps the
+// value's own precision and only adds `.0` when it would render as an integer.
+export function glslFloat(v) {
+    const s = String(v);
+    return s.includes('.') || s.includes('e') ? s : s + '.0';
+}
+
 export const FRACTALS = {
     mandelbox: {
         position: [0.0, 1.8, -11.0],
         bboxHalf: [1.2, 1.2, 1.2],
-        scale: 0.9,
+        // Zoom of the hologram: the visible fractal half-width is
+        // bboxHalf / scale, so lowering this fits more fractal space into the
+        // same physical volume. At 0.9 only 1.33 units were visible while the
+        // mandelbox's own extent runs 2.8 to 29, so the clip box supplied about
+        // half the visible surface and the sculpture read as a plain block.
+        // 0.35 shows 3.43 units, which lands the clip near the 30% target.
+        // The average hides the shape of it: the median waypoint is only a few
+        // percent clipped and a minority are nearly all clip, which is the tail
+        // that pulls the mean up. Measured over 200 accepted waypoints.
+        // The display shader and the shadow caster both read this value, so
+        // they stay in step; the bounding volume itself is unchanged.
+        scale: 0.35,
         // Spotlight offset from fractal center
         spotlightOffset: [-1.5, -1.5, 1.5],
+        // Cone-traced hit threshold, in pixel footprints. The surface epsilon
+        // widens with ray distance so a sample stands for the area it actually
+        // covers: 1.0 is one pixel of footprint, and 0 disables it, reverting to
+        // the fixed MIN_DIST at every range. See buildFractalShader.
+        coneK: 1.0,
     },
     mandelbulb: {
         position: [-11.0, 1.8, 0.0],
@@ -404,7 +429,7 @@ export function generateGLSLConstants() {
         } else {
             lines.push(`const vec3 ${upper}_BBOX = vec3(${bbox.map(v => v.toFixed(1)).join(', ')});`);
         }
-        lines.push(`const float ${upper}_SCALE = ${f.scale.toFixed(1)};`);
+        lines.push(`const float ${upper}_SCALE = ${glslFloat(f.scale)};`);
     }
     lines.push('');
 
