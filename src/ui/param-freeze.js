@@ -1,3 +1,5 @@
+import { showToast } from './toast.js';
+
 // Temporarily freezes fractal parameter animation so a still shot can be framed.
 //
 // Pressing the key again extends the freeze rather than toggling it off: the
@@ -11,29 +13,9 @@
 
 const FREEZE_S = 30;
 const ESCAPE_S = 5;   // ESC cuts a long freeze short after a screenshot
+const TOAST_MS = 2000;   // the freeze is announced, not tracked on screen
 
-let el = null;
 let remaining = 0;        // seconds of render time left; 0 means not frozen
-
-function ensureEl() {
-    if (!el) {
-        el = document.createElement('div');
-        el.className = 'param-freeze';
-        document.body.appendChild(el);
-    }
-    return el;
-}
-
-function paint() {
-    if (!el) return;
-    if (remaining <= 0) {
-        el.classList.remove('visible');
-        return;
-    }
-    // Round up so the label reads the full duration the instant it appears and
-    // only reaches "1 s" during the final second.
-    el.textContent = `Paramètres figés — ${Math.ceil(remaining)} s`;
-}
 
 /**
  * Advance the freeze by one rendered frame. Called from the render loop, which
@@ -43,7 +25,6 @@ function paint() {
 export function tickFreeze(dt) {
     if (remaining <= 0) return;
     remaining = Math.max(0, remaining - dt);
-    paint();
 }
 
 /**
@@ -51,10 +32,8 @@ export function tickFreeze(dt) {
  * @param {number} duration - seconds of render time to hold (tests override this)
  */
 export function extendFreeze(duration = FREEZE_S) {
-    const node = ensureEl();
     remaining = duration;
-    node.classList.add('visible');
-    paint();
+    showToast(`Paramètres figés — ${Math.ceil(duration)} s`, TOAST_MS);
 }
 
 export function isFrozen() {
@@ -70,7 +49,6 @@ export function isFrozen() {
 export function clearFreeze() {
     if (!isFrozen()) return;
     remaining = 0;
-    paint();
 }
 
 /**
@@ -83,6 +61,5 @@ export function cutFreezeShort() {
     if (!isFrozen()) return;
     if (ESCAPE_S < remaining) {
         remaining = ESCAPE_S;
-        paint();
     }
 }

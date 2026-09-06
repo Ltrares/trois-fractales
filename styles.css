@@ -308,26 +308,3 @@ canvas { display: block; }
 #scan-debug .ok { color: #0f0; }
 
 .hidden { display: none !important; }
-
-/* Parameter-freeze indicator (P) - sits opposite the toast so both can show */
-.param-freeze {
-    position: fixed;
-    top: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-10px);
-    background: rgba(0,0,0,0.8);
-    color: #6cf;
-    font-size: 14px;
-    letter-spacing: 0.5px;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: 1px solid rgba(102,204,255,0.4);
-    pointer-events: none;
-    z-index: 150;
-    opacity: 0;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.param-freeze.visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-}
