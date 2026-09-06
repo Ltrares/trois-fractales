@@ -138,15 +138,56 @@ export const MATERIAL_IDS = {
 // Defines where slides are projected in world space (like a projector on floor)
 // Independent of wall materials - just overlays on whatever surface is there
 export const SLIDE_PROJECTION = {
-    // Center of the projection rectangle on the atrium floor
-    center: [0.0, 0.01, -1.0],
+    // Center of the projection rectangle on the atrium floor.
+    // Pushed back (-z) so the rotated square's leading corner clears the front
+    // wall at z = 4.7; rotated, the corners reach halfWidth * sqrt(2) rather
+    // than halfWidth.
+    center: [0.0, 0.01, -2.3],
     // Half-extents defining the projection area
     // For floor: width is along x, height is along z
-    halfWidth: 2.0,      // x direction
-    halfHeight: 1.5,     // z direction (maintains 4:3 aspect ratio)
+    // Square, so the julia floor stamp is not stretched
+    halfWidth: 4.4,      // x direction
+    halfHeight: 4.4,     // z direction
+    // Rotation of the rectangle about its centre, in radians. The projection is
+    // placed at an angle in world space; the texture and its UVs are unaffected.
+    rotation: -Math.PI / 4,
     // Which axis the projection faces (normal direction)
     facing: '+y',        // faces up from floor
+
+    // How a slide looks when it says nothing about itself: shown as-is, in
+    // colour, at full strength. A slide overrides only the keys it cares about
+    // (see SLIDES), so a new slide never inherits another slide's styling.
+    defaults: {
+        // Overall strength where the slide is fully opaque.
+        opacity: 1.0,
+        // Width of the fade at the rectangle edge, as a fraction of the
+        // half-extent. Keeps a slide from ending in a hard rectangle.
+        feather: 0.12,
+        // Self-illumination, for a slide that must stay legible away from the
+        // spotlights.
+        glow: 0.0,
+        // Desaturate toward grey (0 = source colour, 1 = fully grey).
+        desaturate: 0.0,
+    },
 };
+
+// The slides shown in that rectangle. Each names its texture and overrides
+// whichever of SLIDE_PROJECTION.defaults it cares about.
+export const SLIDES = {
+    // The julia mark: the same artwork as the site favicon, dropped to grey and
+    // low opacity so it reads as worn inlay in the concrete rather than a
+    // picture lying on the floor.
+    juliaStamp: {
+        opacity: 0.07,
+        desaturate: 1.0,
+        glow: 0.03,
+    },
+};
+
+// A slide's settings: its own overrides on top of the defaults.
+export function slideSettings(slide) {
+    return { ...SLIDE_PROJECTION.defaults, ...(slide || {}) };
+}
 
 // Material definitions with colors and optional texture UV regions
 // textureRegion defines the world-space bounds where texture is mapped

@@ -103,8 +103,12 @@ export class ShaderManager {
             shadowArrayTex: gl.getUniformLocation(prog, 'u_shadowArrayTex'),
             // Peephole easter egg texture
             peepholeTex: gl.getUniformLocation(prog, 'u_peepholeTex'),
-            // Animated slides texture
+            // Animated slides texture, and the active slide's appearance
             slidesTex: gl.getUniformLocation(prog, 'u_slidesTex'),
+            slideOpacity: gl.getUniformLocation(prog, 'u_slideOpacity'),
+            slideFeather: gl.getUniformLocation(prog, 'u_slideFeather'),
+            slideGlow: gl.getUniformLocation(prog, 'u_slideGlow'),
+            slideDesaturate: gl.getUniformLocation(prog, 'u_slideDesaturate'),
             // Time for animation
         };
     }

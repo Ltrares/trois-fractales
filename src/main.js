@@ -20,7 +20,8 @@ import { createWallTexture } from './textures/wall-texture.js';
 import { createCodeTexture } from './textures/code-texture.js';
 import { createConcreteTexture } from './textures/concrete-texture.js';
 import { createPeepholeTexture } from './textures/peephole-texture.js';
-// import { createSlideTexture } from './textures/slides-texture.js';  // Slideshow disabled
+import { createJuliaTexture } from './textures/julia-texture.js';
+import { SLIDES, slideSettings } from './geometry/GalleryGeometry.js';
 
 import { Camera } from './camera/camera.js';
 import { CameraController } from './camera/camera-controller.js';
@@ -134,7 +135,7 @@ const mandelbulbCodeTexture = createCodeTexture(gl, mandelbulbCodeString);
 const juliaCodeTexture = createCodeTexture(gl, juliaCodeString);
 const concreteTexture = createConcreteTexture(gl);
 const peepholeTexture = createPeepholeTexture(gl);
-// const slideTextureManager = createSlideTexture(gl);  // Slideshow disabled
+const juliaStampTexture = createJuliaTexture(gl, 1024);
 
 // Bake shadows for all surfaces
 function bakeShadows() {
@@ -417,11 +418,16 @@ function render() {
     gl.bindTexture(gl.TEXTURE_2D, concreteTexture);
     gl.uniform1i(galleryLocs.concreteTex, 5);
 
-    // Slideshow disabled - texture slot 6 unused
-    // slideTextureManager.update(now, cameraController.isPaused);
-    // gl.activeTexture(gl.TEXTURE6);
-    // gl.bindTexture(gl.TEXTURE_2D, slideTextureManager.getTexture());
-    // gl.uniform1i(galleryLocs.slidesTex, 6);
+    // The active slide, projected via the slide projection rectangle, with its
+    // own appearance settings over SLIDE_PROJECTION.defaults.
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, juliaStampTexture);
+    gl.uniform1i(galleryLocs.slidesTex, 6);
+    const slide = slideSettings(SLIDES.juliaStamp);
+    gl.uniform1f(galleryLocs.slideOpacity, slide.opacity);
+    gl.uniform1f(galleryLocs.slideFeather, slide.feather);
+    gl.uniform1f(galleryLocs.slideGlow, slide.glow);
+    gl.uniform1f(galleryLocs.slideDesaturate, slide.desaturate);
 
     gl.activeTexture(gl.TEXTURE7);
     gl.bindTexture(gl.TEXTURE_2D, peepholeTexture);
@@ -636,6 +642,7 @@ function cleanup() {
     gl.deleteTexture(juliaCodeTexture);
     gl.deleteTexture(concreteTexture);
     gl.deleteTexture(peepholeTexture);
+    gl.deleteTexture(juliaStampTexture);
     // slideTextureManager.dispose();  // Slideshow disabled
     // Delete VAO and VBO
     gl.deleteBuffer(vbo);

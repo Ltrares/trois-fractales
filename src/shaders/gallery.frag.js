@@ -16,7 +16,7 @@ import { glslFloat,
     MATERIALS,
     MATERIAL_IDS,
     PEEPHOLE,
-    // SLIDE_PROJECTION,  // Slideshow disabled
+    SLIDE_PROJECTION,
 } from '../geometry/GalleryGeometry.js';
 
 import { allHelpers, allShadowDEs } from './fractals/fractal-des.js';
@@ -377,8 +377,14 @@ uniform sampler2D u_juliaCodeTex;
 uniform highp sampler2DArray u_shadowArrayTex;
 // Easter egg peephole texture
 uniform sampler2D u_peepholeTex;
-// Animated slides texture (disabled)
-// uniform sampler2D u_slidesTex;
+// The slide projected onto the atrium floor, and its per-slide appearance.
+// These are uniforms rather than baked constants because they vary per slide:
+// see SLIDES and SLIDE_PROJECTION.defaults in GalleryGeometry.js.
+uniform sampler2D u_slidesTex;
+uniform float u_slideOpacity;
+uniform float u_slideFeather;
+uniform float u_slideGlow;
+uniform float u_slideDesaturate;
 
 const float MIN_DIST = 0.002;
 const float MAX_DIST = 100.0;
@@ -885,11 +891,40 @@ ${generateMaterialHandling()}
             col += emissiveText;
         }
 
-        // Slide projection disabled
-        // {
-        //     vec3 slideCenter = vec3(...);
-        //     ...
-        // }
+        // Julia floor stamp: projected onto whatever surface sits under the
+        // atrium rectangle, independent of that surface's material.
+        if (nor.y > 0.5) {
+            vec3 stampCenter = ${vec3(SLIDE_PROJECTION.center)};
+            vec2 stampHalf = vec2(${SLIDE_PROJECTION.halfWidth.toFixed(2)}, ${SLIDE_PROJECTION.halfHeight.toFixed(2)});
+            const float STAMP_ROT = ${SLIDE_PROJECTION.rotation.toFixed(6)};
+            // Rotate into the stamp's own frame before the bounds test, so it
+            // is the stamp rectangle that sits at an angle on the floor. The
+            // UVs stay a plain 0..1 map of that rectangle.
+            vec2 world = pos.xz - stampCenter.xz;
+            float cr = cos(STAMP_ROT), sr = sin(STAMP_ROT);
+            vec2 d2 = vec2(world.x * cr + world.y * sr,
+                          -world.x * sr + world.y * cr);
+            if (abs(d2.x) <= stampHalf.x && abs(d2.y) <= stampHalf.y) {
+                vec2 stampUV = d2 / (2.0 * stampHalf) + 0.5;
+                vec4 stamp = texture(u_slidesTex, stampUV);
+
+                // Fade the slide out at the rectangle edge so it reads as an
+                // inlay in the floor rather than a pasted-on decal.
+                vec2 edge = 1.0 - abs(d2) / stampHalf;
+                float feather = smoothstep(0.0, u_slideFeather, min(edge.x, edge.y));
+
+                // Desaturate here rather than in the texture, so a slide's
+                // source image is left alone.
+                float stampLum = dot(stamp.rgb, vec3(0.299, 0.587, 0.114));
+                vec3 stampCol = mix(stamp.rgb, vec3(stampLum), u_slideDesaturate);
+
+                // Lit like the floor it sits in, plus optional self-glow for a
+                // slide that must stay legible away from the spotlights.
+                float stampA = stamp.a * feather * u_slideOpacity;
+                vec3 stampLit = stampCol * (ambient + diff * bakedShadow * 0.25 + spot);
+                col = mix(col, stampLit + stampCol * u_slideGlow, stampA);
+            }
+        }
 
         if (matId == 2) {
             float wallNdotL = max(dot(nor, normalize(vec3(0.0, 0.3, -1.0))), 0.0);

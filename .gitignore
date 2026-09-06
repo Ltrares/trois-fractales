@@ -24,3 +24,7 @@
 Thumbs.db
 
 serve.sh
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc
