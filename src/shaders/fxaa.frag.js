@@ -15,6 +15,14 @@ uniform vec2 u_resolution;
 // image through FXAA measures the pair, not the accumulator.
 uniform int u_fxaaOn;
 
+// 0 skips compositing the text layer entirely. The layer is written by the
+// gallery pass and blended here, after FXAA, which keeps the glyphs crisp but
+// leaves the blend with no depth information: the gallery pass runs before any
+// fractal, so the layer holds wall text at pixels where a sculpture is later
+// drawn in front of that wall, and this blend then paints the front wall over
+// solid geometry.
+uniform int u_textPassOn;
+
 // FXAA quality settings
 const float FXAA_REDUCE_MIN = 1.0 / 128.0;
 const float FXAA_REDUCE_MUL = 1.0 / 8.0;
@@ -29,9 +37,11 @@ void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution;
     vec2 texelSize = 1.0 / u_resolution;
 
+    float textMask = u_textPassOn == 0 ? 0.0 : 1.0;
+
     if (u_fxaaOn == 0) {
         vec4 t = texture(u_textLayer, uv);
-        vec3 r = mix(texture(u_texture, uv).rgb, t.rgb, t.a);
+        vec3 r = mix(texture(u_texture, uv).rgb, t.rgb, t.a * textMask);
         fragColor = vec4(r, 1.0);
         return;
     }
@@ -97,7 +107,7 @@ void main() {
     // The alpha already carries the 0.9 blend weight from the gallery pass, and
     // the glyph texture supplies its own anti-aliased edges. Attenuating again
     // here would only make the text washed out, not smoother.
-    vec3 result = mix(fxaaResult, text.rgb, text.a);
+    vec3 result = mix(fxaaResult, text.rgb, text.a * textMask);
 
     fragColor = vec4(result, 1.0);
 }`;

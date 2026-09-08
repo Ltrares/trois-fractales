@@ -115,7 +115,8 @@ const fxaaLocs = {
     texture: gl.getUniformLocation(fxaaProgram, 'u_texture'),
     textLayer: gl.getUniformLocation(fxaaProgram, 'u_textLayer'),
     resolution: gl.getUniformLocation(fxaaProgram, 'u_resolution'),
-    fxaaOn: gl.getUniformLocation(fxaaProgram, 'u_fxaaOn')
+    fxaaOn: gl.getUniformLocation(fxaaProgram, 'u_fxaaOn'),
+    textPassOn: gl.getUniformLocation(fxaaProgram, 'u_textPassOn')
 };
 
 const shadowBakeLocs = {
@@ -282,6 +283,16 @@ let TSAA_ON = true;
 // only touches geometry.
 let FXAA_ON = true;
 
+// The separate text pass. Wall text travels on its own attachment, written by
+// the gallery pass and composited after FXAA so the filter cannot soften it.
+// The cost of running last is that it has no depth: the gallery pass produces
+// it before any fractal is drawn, so it carries wall text for pixels where a
+// sculpture is later drawn in front of that wall, and blending it at the end
+// paints the front wall over solid geometry. Off, the text is simply not
+// composited. The attachment, the gallery's writes to it and the FXAA plumbing
+// all stay in place, so this is one flag to flip back.
+let TEXT_PASS_ON = false;
+
 // Samples the running mean stops at. Only ever reached while the scene is fully
 // static, so the extra frames are free: nothing is waiting on them and the cost
 // while moving is zero because the pass does not run.
@@ -333,6 +344,8 @@ window.tsaa = {
     set jitter(v) { TSAA_JITTER = Math.max(0, Math.min(0.5, v)); fboManager.accumReset = true; },
     get fxaa() { return FXAA_ON; },
     set fxaa(v) { FXAA_ON = !!v; },
+    get textPass() { return TEXT_PASS_ON; },
+    set textPass(v) { TEXT_PASS_ON = !!v; },
 };
 
 // Animation state
@@ -639,6 +652,8 @@ function render() {
 
     gl.uniform2f(fxaaLocs.resolution, width, height);
     gl.uniform1i(fxaaLocs.fxaaOn, FXAA_ON ? 1 : 0);
+
+    gl.uniform1i(fxaaLocs.textPassOn, TEXT_PASS_ON ? 1 : 0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
