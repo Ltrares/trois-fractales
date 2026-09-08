@@ -137,20 +137,34 @@ const concreteTexture = createConcreteTexture(gl);
 const peepholeTexture = createPeepholeTexture(gl);
 const juliaStampTexture = createJuliaTexture(gl, 1024);
 
-// Bake shadows for all surfaces
-function bakeShadows() {
+// Bake shadows for all surfaces.
+//
+// One surface per animation frame rather than all 18 in a single burst. The
+// whole bake is 18 layers x 2048^2 pixels, each marching seven soft shadows
+// through the gallery SDF for up to 256 steps, and submitting that in one go
+// followed by gl.finish() blocks the main thread until the GPU drains the lot.
+// The browser cannot composite while it is blocked, so the "Calcul des ombres"
+// overlay never repaints and the page reads as a long blank load. Yielding
+// between layers costs nothing on the GPU - the same draws are issued - but it
+// lets the overlay paint and gives the progress count somewhere to show.
+function beginShadowBake(onComplete) {
     console.log(`Baking shadows (${SHADOW_TEX_SIZE}x${SHADOW_TEX_SIZE} x ${SHADOW_LAYERS} surfaces)...`);
 
     fboManager.createShadowArray(SHADOW_TEX_SIZE, SHADOW_LAYERS);
 
-    gl.useProgram(shadowBakeProgram);
-    gl.bindVertexArray(vao);
-    gl.viewport(0, 0, SHADOW_TEX_SIZE, SHADOW_TEX_SIZE);
-    gl.uniform2f(shadowBakeLocs.resolution, SHADOW_TEX_SIZE, SHADOW_TEX_SIZE);
+    let next = 0;
 
-    // Bake each surface
-    for (const surface of SHADOW_SURFACES) {
-        console.log(`  Baking surface ${surface.id}: ${surface.name}`);
+    function bakeOne() {
+        const surface = SHADOW_SURFACES[next];
+
+        // The programs and uniforms are re-bound per layer: the render loop is
+        // not running yet, but other setup between frames may bind elsewhere,
+        // and re-binding a program is far cheaper than one of these draws.
+        gl.useProgram(shadowBakeProgram);
+        gl.bindVertexArray(vao);
+        gl.viewport(0, 0, SHADOW_TEX_SIZE, SHADOW_TEX_SIZE);
+        gl.uniform2f(shadowBakeLocs.resolution, SHADOW_TEX_SIZE, SHADOW_TEX_SIZE);
+
         fboManager.bindShadowLayer(surface.id);
 
         gl.uniform1i(shadowBakeLocs.surfaceType, surface.type);
@@ -161,26 +175,47 @@ function bakeShadows() {
         gl.uniform1f(shadowBakeLocs.maxV, surface.maxV);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        next++;
+
+        // Pace on a fence rather than just issuing the draw and moving on.
+        // Yielding alone is not enough: an rAF loop queues all 18 layers within
+        // a few frames, the counter runs to 18/18 almost immediately, and then
+        // the page sits for the whole bake with a finished-looking progress
+        // message while the GPU chews through the backlog. Waiting for each
+        // layer's fence before issuing the next makes the count track real
+        // progress, and keeps the queue short enough that the compositor still
+        // gets its turn.
+        const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+
+        (function poll() {
+            // Zero timeout: ask whether the fence has signalled and return
+            // immediately either way. A non-zero wait here would block the main
+            // thread, which is the stall this split exists to remove.
+            const status = gl.clientWaitSync(fence, 0, 0);
+            if (status === gl.TIMEOUT_EXPIRED) {
+                requestAnimationFrame(poll);
+                return;
+            }
+            gl.deleteSync(fence);
+
+            startBtn.textContent = `Calcul des ombres... ${next}/${SHADOW_LAYERS}`;
+
+            if (next < SHADOW_LAYERS) {
+                requestAnimationFrame(bakeOne);
+            } else {
+                console.log('Shadow baking complete!');
+                requestAnimationFrame(onComplete);
+            }
+        })();
     }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    // Ensure GPU completes all shadow baking before continuing
-    gl.finish();
-
-    // No timing here: gl.finish() is a hint rather than a hard barrier in
-    // browsers, so it returns before the GPU has really finished and any
-    // number measured around it reads far lower than the wait actually is.
-    console.log('Shadow baking complete!');
+    // First layer on the next frame, so the overlay paints before any GPU work
+    // is queued rather than after it.
+    requestAnimationFrame(bakeOne);
 }
-
-bakeShadows();
-
-// Enable start button after GPU is fully ready (defer to next frame for safety)
-requestAnimationFrame(() => {
-    startBtn.disabled = false;
-    startBtn.textContent = 'Entrez';
-});
 
 // Create camera and controller
 const camera = new Camera();
@@ -625,7 +660,15 @@ function render() {
     }
 }
 
-render();
+// The gallery shader samples the baked shadow array, so the render loop only
+// starts once every layer is written; until then the overlay is what is on
+// screen. The button is enabled at the same moment - it was already gated on
+// the bake, and now the bake is the thing that reports it is done.
+beginShadowBake(() => {
+    startBtn.disabled = false;
+    startBtn.textContent = 'Entrez';
+    render();
+});
 
 // Cleanup GPU resources on page unload to prevent context exhaustion
 let cleanedUp = false;

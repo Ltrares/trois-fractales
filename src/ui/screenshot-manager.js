@@ -217,7 +217,7 @@ export class ScreenshotManager {
             if (entry.fractals) {
                 if (entry.fractals.mandelbox) {
                     const m = entry.fractals.mandelbox;
-                    metaText += `\nmbox: s=${m.scale?.toFixed(2)} minR=${m.minR?.toFixed(2)} fixR=${m.fixedR?.toFixed(2)}`;
+                    metaText += `\nmbox: s=${m.scale?.toFixed(2)} minR=${m.minR?.toFixed(2)} fixR=${m.fixedR?.toFixed(2)} fold=${m.foldLimit?.toFixed(2)}`;
                 }
                 if (entry.fractals.mandelbulb) {
                     const b = entry.fractals.mandelbulb;

@@ -60,6 +60,13 @@
   <label>fold <input type="range" id="fold" min="0.2" max="2" step="0.01" value="1.0">
     <span class="val" id="foldV">1.00</span></label>
   <div class="sep"></div>
+  <label title="B only: march step as a fraction of the DE. 1 = full length.">step
+    <input type="range" id="stepF" min="0.05" max="1" step="0.01" value="1.0">
+    <span class="val" id="stepFV">1.00</span></label>
+  <label title="B only: hit epsilon. The normal sample width follows it.">eps
+    <input type="range" id="hitE" min="0.00005" max="0.004" step="0.00005" value="0.002">
+    <span class="val" id="hitEV">0.00200</span></label>
+  <div class="sep"></div>
 
   <button id="accum" class="on">accum: on</button>
   <button id="diag">diag: off</button>
@@ -76,36 +83,57 @@
     <input type="range" id="jit" min="0" max="0.5" step="0.01" value="0.5">
     <span class="val" id="jitV">0.50</span></label>
   <div class="sep"></div>
-  <button id="ss">SS: off</button>
   <div class="sep"></div>
   <button id="wobble">wobble: off</button>
   <button id="normals">view: shaded</button>
+  <span id="heatkey" style="display:none; font-family:ui-monospace,Menlo,monospace; font-size:11px">
+    <b style="color:#3f3">green</b> hit (bright = more steps) ·
+    <b style="color:#fd0">yellow</b> hit at &gt;90% budget ·
+    <b style="color:#f44">red</b> EXPIRED (out of steps) ·
+    <b style="color:#48f">blue</b> exited box (true miss)
+  </span>
   <button id="res">res: 1x</button>
 </div>
 <div class="bar" id="pagebar">
   <span style="color:#888">page:</span>
   <span class="val" id="frameRate" style="min-width:150px;color:#9f9">–</span>
 </div>
+<div class="bar" id="casebar">
+  <label style="flex:1 1 460px">case
+    <input type="text" id="caseText" spellcheck="false"
+           style="flex:1; min-width:300px; background:#1a1a1a; color:#ddd;
+                  border:1px solid #444; border-radius:4px; padding:5px 8px;
+                  font-family:ui-monospace,Menlo,monospace; font-size:12px"
+           placeholder="s=-0.79 minR=0.43 fixR=1.10 fold=0.65 dist=8.6 orbit=0.52 height=1.7">
+  </label>
+  <button id="caseLoad">load</button>
+  <button id="caseCopy">copy current</button>
+  <span id="caseMsg" style="color:#888"></span>
+</div>
 <div id="hint">
   Drag a pane to orbit · scroll to dolly · <b>wobble</b> jitters the camera sub-pixel to expose
   view-dependent sparkle while standing still.<br>
   Timing: draw order alternates each frame; figure is the median of up to 240 samples
   with ±half the 10–90 spread. Stats reset when a control changes.
-Pane B is progressive accumulation (time-based multisampling), NOT TAA: Halton-jittered sub-pixel samples
-  averaged in place as a true 1/n running mean. No reprojection, no history
-  rejection, no neighbourhood clamp -- none of that exists in this file.
-  It converges only while the camera is parked, and the accumulator is discarded
-  on any camera change, so while moving B is a plain single-sample image.
-  Convergence is exact but SLOW by construction: at 1/n the newest frame is worth
-  0.17% by frame 600, so the last of the settling takes minutes. That is the
-  mean working correctly, not a stall. <b>accum</b> off makes B identical to A.
-  <b>SS</b> now applies to both panes, so cone tracing can be judged with or without it.
+Pane A is production. <b>Pane B uses step x0.3 with hit epsilon 0.0005</b> -
+  the two together; neither works alone. Measured against a bisected
+  ground-truth surface (scan at 30&deg;, dist 8.6, s=-0.79 minR=0.43 fixR=1.10
+  fold=0.65), mean normal change between adjacent rays: <b>truth 22.2&deg;,
+  production 83.5&deg; (3.76x), step 0.3 alone 11.0&deg; (0.50x), step 0.3 +
+  eps 0.0005 21.9&deg; (0.99x)</b>. So A is not resolving detail, it is
+  manufacturing it - 83&deg; of normal swing between neighbouring pixels is
+  noise from inconsistent hit depths, which is also what sparkles under motion.
+  A short step alone looked flat because the fat 0.002 epsilon stopped rays on
+  the outside of a 0.002 shell, smoother than the real surface. Tuned on one
+  parameter set at one angle.
 </div>
 <div id="err"></div>
 
 <script type="module">
 import { buildFractalShader } from './src/shaders/fractal-template.js';
 import { mandelboxDE } from './src/shaders/fractals/mandelbox-de.js';
+import { makeMandelboxDE, mandelboxUniforms, boxFoldHelper, sphereFoldHelper }
+  from './src/shaders/fractals/fractal-des.js';
 import { vertexShaderSrc } from './src/shaders/common/vertex.js';
 import { FRACTALS } from './src/geometry/GalleryGeometry.js';
 
@@ -123,28 +151,96 @@ const BASE = {
 
 const VARIANTS = {
   A: {
-    name: 'baseline  k=0.001, hit=MIN_DIST',
+    // Production exactly as it ships, left untouched so it is the reference the
+    // other pane is read against.
+    name: 'current (production, unchanged)',
     opts: { ...BASE },
   },
   B: {
-    // Identical to A but for the hit threshold: B widens it with distance so a
-    // sample stands for the pixel it actually covers.
+    // Step size and hit epsilon together. Neither works alone.
     //
-    // A marches to a fixed MIN_DIST (0.002) at every range. A pixel at 7 units
-    // subtends far more than 0.002 world units, so A resolves detail finer than
-    // it can display: whether a given micro-feature is inside the epsilon flips
-    // as the camera moves, and the pixel blinks. That is the distance sparkle.
+    // The mandelbox DE is not a strict lower bound on distance-to-surface, so a
+    // full-length step can carry the ray past fine structure. Measured on a
+    // horizontal scan at 30 degrees, dist 8.6, s=-0.79 minR=0.43 fixR=1.10
+    // fold=0.65, against a surface located by bisection to ~1e-9, using the mean
+    // change in NORMAL between adjacent rays - which is what shading shows:
     //
-    // B takes max(MIN_DIST, pixelFootprint(t) * coneK) - the cone radius at the
-    // hit distance - so near the camera it behaves exactly like A and only
-    // loosens where a pixel is genuinely wider than the detail. coneK is the
-    // slider, so 1.0 is one pixel of footprint and 0 reverts B to A.
-    name: 'cone hit epsilon  (only change)',
-    uniforms: 'uniform float u_coneK;',
-    // Inlined rather than calling the template's pixelFootprint(): the
-    // expression is substituted into this variant's own shader, so it does not
-    // depend on the helper existing in a separately-cached module.
-    opts: { ...BASE, hitEpsilon: 'max(MIN_DIST, t * u_coneK / (u_resolution.y * 1.5 * u_zoom))' },
+    //   step  eps      mean pos error   roughness      vs truth
+    //   1.0   0.002      3.09e-2          83.5 deg      3.76x   <- production
+    //   0.5   0.002      2.07e-3          30.5 deg      1.37x
+    //   0.3   0.002      3.33e-3          11.0 deg      0.50x
+    //   0.3   0.0005     1.69e-4          21.9 deg      0.99x   <- this pane
+    //                                   (truth 22.2 deg)
+    //
+    // Production is not resolving fine detail, it is manufacturing it: 83
+    // degrees of normal swing between neighbouring pixels is not a surface, it
+    // is noise from landing at inconsistent depths - and that is what
+    // scintillates when the camera moves.
+    //
+    // The epsilon is why a short step alone looked wrong. At 0.3 with the fat
+    // 0.002 epsilon the ray creeps up and trips the test early, stopping on the
+    // OUTSIDE of a 0.002-thick shell around the surface; that shell is smoother
+    // than the geometry inside it, so the image went flat (0.50x) even though
+    // the step was finer. Tightening the epsilon lets the same step reach the
+    // real surface. The pair also has the lowest position error measured, about
+    // 180x better than production, and finds all 43 rays where production
+    // finds 41 - so production loses real surface as well as adding noise.
+    //
+    // Tuned on ONE parameter set at ONE angle, and a tighter epsilon costs
+    // steps. Re-measure elsewhere before trusting it generally.
+    name: 'step + eps sliders (budget and normal width follow)',
+    uniforms: 'uniform float u_stepF;\nuniform float u_hitE;',
+    opts: { ...BASE,
+      stepFactor: 'u_stepF',
+      hitEpsilon: 'u_hitE',
+      // Tied to the hit epsilon, not left at the default 0.001. The epsilon
+      // sets how fine a feature the march can land on; this sets how fine a
+      // feature the shading can show. Leaving it fixed while tightening the
+      // epsilon averages the normal over detail the march just resolved, so
+      // detail vanishes instead of sharpening.
+      normalEpsilon: 'u_hitE',
+      // Hit epsilon deliberately left at production's MIN_DIST. An earlier
+      // version of this pane also tightened it to 0.0005, which made the slider
+      // a two-variable control - and the epsilon is the half that suppresses
+      // detail, since a tighter one keeps rays creeping toward the surface. One
+      // knob means one change.
+      //
+      // The step BUDGET is not a second knob either: a step of f x the DE needs
+      // 1/f as many steps to cross the same distance, so shortening the step at
+      // a fixed count just makes rays fall short and drop out, which reads as
+      // lost detail rather than as an exhausted budget. It is derived: 60 steps
+      // at full length, scaled by 1/f.
+      //
+      // The ceiling is baked because GLSL needs a constant loop bound, so it is
+      // set for the slider's smallest step (0.01 -> 6000) and the runtime
+      // budget breaks out earlier. Only the comparison runs when the budget is
+      // low, so a high ceiling is not itself a cost.
+      // The budget follows BOTH knobs, because both make rays take more steps.
+      //
+      // Step: a step of f x the DE needs 1/f as many steps to cross the same
+      // distance. That part was already here.
+      //
+      // Epsilon: this was missing, and it is the one that matters. A tighter
+      // epsilon makes the ray thread finer structure before it can stop.
+      // Measured on the default sculpture, worst-case steps to a hit:
+      //     eps 0.002 -> 1     eps 0.0005 -> 17
+      //     eps 0.001 -> 13    eps 0.0002 -> 80
+      //     eps 0.0001 -> 205  eps 0.00005 -> 485
+      // which is about 12 * (0.002 / eps). That is used with a 3x margin -
+      // the measurements are one sculpture at one angle, and a budget that only
+      // just covers the worst case seen would expire rays elsewhere - plus a
+      // floor of 60 so the loose end behaves exactly as production does.
+      //
+      // Without this the budget stayed at 60 whenever the step was 1.0, so
+      // tightening the epsilon alone just expired rays - they were 2 steps from
+      // a hit and had no steps left. That reads as the fractal going porous and
+      // vanishing, which is a budget artifact, not geometry: at eps 0.0001 a
+      // budget of 300 takes expired rays from 1.6% to zero.
+      //
+      // The ceiling is baked because GLSL needs a constant loop bound. 4x the
+      // 485 worst case measured, since that was one sculpture at one angle.
+      maxSteps: 2000,
+      stepBudget: 'min(2000.0, max(60.0, 36.0 * (0.002 / max(u_hitE, 0.00001))) / max(u_stepF, 0.05))' },
   },
 };
 
@@ -172,14 +268,19 @@ function makePane(canvasId, variant) {
   if (!gl) throw new Error('WebGL2 unavailable');
 
   const opts = { ...variant.opts };
-  if (SHOW_NORMALS) opts.debugNormals = true;
+  if (VIEW === 'normals') opts.debugNormals = true;
+  if (VIEW === 'heat') opts.debugHeat = true;
   // The hologram volume (bboxHalf) is fixed by the room - it is the space the
   // sculpture physically occupies on its pedestal. A variant changes only
   // FRACTAL_SCALE, which sets how much fractal space maps into that volume.
   const fractalScale = (variant.fractalScale ?? mbx.scale).toFixed(3);
+  // Production surface colour. A variant may override it with `color` to probe
+  // what the colour term actually contributes; absent an override this is what
+  // both panes get, so A stays exactly the shipping shader.
+  const PROD_COLOR = 'mix(vec3(0.25, 0.2, 0.2), vec3(0.89, 0.89, 0.90), iterProxy)';
   const fragSrc = buildFractalShader(
-    mandelboxDE, variant.uniforms || '', g(mbx.position), g(mbx.bboxHalf), fractalScale,
-    'mix(vec3(0.25, 0.2, 0.2), vec3(0.89, 0.89, 0.90), iterProxy)',
+    variant.fractalDE || mandelboxDE, variant.uniforms || '', g(mbx.position), g(mbx.bboxHalf), fractalScale,
+    variant.color || PROD_COLOR,
     g(mbx.spotlightOffset), '0.23', variant.specExp || '32.0', '20', opts
   );
 
@@ -205,7 +306,8 @@ function makePane(canvasId, variant) {
     jitter: U('u_jitter'),
     s: U('u_mandelboxScale'), minR: U('u_mandelboxMinR'),
     fixR: U('u_mandelboxFixedR'), fold: U('u_mandelboxFoldLimit'),
-    normalCoef: U('u_normalCoef'), coneK: U('u_coneK'), normK: U('u_normK'),
+    normalCoef: U('u_normalCoef'), normK: U('u_normK'),
+    stepF: U('u_stepF'), hitE: U('u_hitE'),
     specK: U('u_specK'),
   };
 
@@ -224,8 +326,12 @@ function makePane(canvasId, variant) {
   const texColor = mkTex([0, 0, 0, 255]);
   const texDepth = mkTex([255, 255, 255, 255]);   // 1.0 * 100 = far
 
+  // Accumulation is a property of the BENCH, not of a variant: production runs
+  // it, so a pane without it is not testing what ships - it shows raw per-pixel
+  // noise that the real app partly averages away. Both panes get it, and the
+  // toggle switches both at once, so the panes still differ only by the variant.
   const pane = { cv, gl, prog, locs, texColor, texDepth, name: variant.name,
-                 supersample: !!variant.supersample, accum: !!variant.accum };
+                 accum: true };
 
   if (pane.accum) {
     // Two history buffers, ping-ponged. Float targets so repeated blending
@@ -423,52 +529,6 @@ void main() {
     gl.vertexAttribPointer(spos, 2, gl.FLOAT, false, 0, 0);
   }
 
-  if (pane.supersample) {
-    // Offscreen colour target + a blit program that box-filters SSxSS samples.
-    pane.fbo = gl.createFramebuffer();
-    pane.rt = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, pane.rt);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    pane.rtW = pane.rtH = 0;
-
-    const blitFrag = `#version 300 es
-precision highp float;
-uniform sampler2D u_src;
-uniform vec2 u_dstRes;
-uniform int u_ss;
-out vec4 fragColor;
-void main() {
-    // Box filter over the SSxSS block of source texels backing this pixel.
-    vec3 acc = vec3(0.0);
-    float n = 0.0;
-    for (int y = 0; y < 4; y++) {
-        if (y >= u_ss) break;
-        for (int x = 0; x < 4; x++) {
-            if (x >= u_ss) break;
-            vec2 sp = (gl_FragCoord.xy - 0.5) * float(u_ss) + vec2(float(x), float(y)) + 0.5;
-            acc += texelFetch(u_src, ivec2(sp), 0).rgb;
-            n += 1.0;
-        }
-    }
-    fragColor = vec4(acc / n, 1.0);
-}`;
-    const bp = gl.createProgram();
-    gl.attachShader(bp, compile(gl, gl.VERTEX_SHADER, vertexShaderSrc, 'blit-vert'));
-    gl.attachShader(bp, compile(gl, gl.FRAGMENT_SHADER, blitFrag, 'blit'));
-    gl.linkProgram(bp);
-    if (!gl.getProgramParameter(bp, gl.LINK_STATUS))
-      throw new Error(gl.getProgramInfoLog(bp));
-    pane.blit = bp;
-    pane.blitLocs = { src: gl.getUniformLocation(bp, 'u_src'),
-                      dstRes: gl.getUniformLocation(bp, 'u_dstRes'),
-                      ss: gl.getUniformLocation(bp, 'u_ss') };
-    const bpos = gl.getAttribLocation(bp, 'a_position');
-    gl.enableVertexAttribArray(bpos);
-    gl.vertexAttribPointer(bpos, 2, gl.FLOAT, false, 0, 0);
-  }
 
   return pane;
 }
@@ -476,7 +536,9 @@ void main() {
 // ---- camera ----------------------------------------------------------------
 const target = mbx.position.slice();
 const cam = { dist: 7, orbit: 0.6, height: 0.4 };
-let WOBBLE = false, SHOW_NORMALS = false, RES = 1, SS = 1;
+let WOBBLE = false, RES = 1;
+// 'shaded' | 'normals' | 'heat'
+let VIEW = 'shaded';
 let ACCUM_ON = true, ACCUM_JIT = 0.5, ACCUM_DIAG = 0, accumFrame = 0;
 // Scatter value that reads as full red in the sparkle map. Measured mean on this
 // scene is ~4.5e-2, so 0.05 puts the typical pixel near the top of the ramp.
@@ -543,7 +605,7 @@ function cameraBasis(jx, jy) {
 
 // ---- render ----------------------------------------------------------------
 const wobbleJit = [0, 0];
-const params = { s: 1.96, minR: 0.20, fixR: 0.71, fold: 1.0, normalCoef: 0.002, coneK: 1.0, normK: 1.0, specK: 1.0 };
+const params = { s: 1.96, minR: 0.20, fixR: 0.71, fold: 1.0, normalCoef: 0.002, normK: 1.0, specK: 1.0, stepF: 1.0, hitE: 0.002 };
 
 function setSceneUniforms(pane, basis, rW, rH) {
   const { gl, locs } = pane;
@@ -560,7 +622,8 @@ function setSceneUniforms(pane, basis, rW, rH) {
   gl.uniform1f(locs.fixR, params.fixR);
   gl.uniform1f(locs.fold, params.fold);
   if (locs.normalCoef) gl.uniform1f(locs.normalCoef, params.normalCoef);
-  if (locs.coneK) gl.uniform1f(locs.coneK, params.coneK);
+  if (locs.stepF) gl.uniform1f(locs.stepF, params.stepF);
+  if (locs.hitE) gl.uniform1f(locs.hitE, params.hitE);
   if (locs.normK) gl.uniform1f(locs.normK, params.normK);
   if (locs.specK) gl.uniform1f(locs.specK, params.specK);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pane.texColor);
@@ -575,45 +638,15 @@ function draw(pane, basis, W, H) {
     pane.cv.width = W; pane.cv.height = H;
   }
 
-  const ss = pane.supersample ? SS : 1;
-  const rW = W * ss, rH = H * ss;
-
   if (pane.accum && ACCUM_ON) { drawAccum(pane, basis, W, H); return; }
 
-  if (ss > 1) {
-    if (pane.rtW !== rW || pane.rtH !== rH) {
-      gl.bindTexture(gl.TEXTURE_2D, pane.rt);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, rW, rH, 0, gl.RGBA,
-                    gl.UNSIGNED_BYTE, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                              gl.TEXTURE_2D, pane.rt, 0);
-      pane.rtW = rW; pane.rtH = rH;
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, pane.fbo);
-  } else {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  gl.viewport(0, 0, rW, rH);
+  // accum off: draw the raw single sample straight to the canvas.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
   gl.useProgram(prog);
   gl.clearColor(0.06, 0.06, 0.07, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-
-  setSceneUniforms(pane, basis, rW, rH);
-
+  setSceneUniforms(pane, basis, W, H);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-  if (ss > 1) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, W, H);
-    gl.useProgram(pane.blit);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, pane.rt);
-    gl.uniform1i(pane.blitLocs.src, 0);
-    gl.uniform2f(pane.blitLocs.dstRes, W, H);
-    gl.uniform1i(pane.blitLocs.ss, ss);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
 }
 
 // Renders the scene jittered into an offscreen buffer, resolves against the
@@ -1045,6 +1078,8 @@ const bind = (id, key, obj, fmt = v => v.toFixed(2)) => {
 bind('dist', 'dist', cam); bind('orbit', 'orbit', cam); bind('hgt', 'height', cam);
 bind('s', 's', params); bind('minR', 'minR', params);
 bind('fixR', 'fixR', params); bind('fold', 'fold', params);
+bind('stepF', 'stepF', params);
+bind('hitE', 'hitE', params, v => v.toFixed(5));
 
 const syncCam = () => {
   document.getElementById('dist').value = cam.dist;
@@ -1060,9 +1095,10 @@ document.getElementById('wobble').addEventListener('click', e => {
   resetStats();
 });
 document.getElementById('normals').addEventListener('click', e => {
-  SHOW_NORMALS = !SHOW_NORMALS;
-  e.target.textContent = 'view: ' + (SHOW_NORMALS ? 'normals' : 'shaded');
-  e.target.classList.toggle('on', SHOW_NORMALS);
+  VIEW = VIEW === 'shaded' ? 'normals' : VIEW === 'normals' ? 'heat' : 'shaded';
+  e.target.textContent = 'view: ' + VIEW;
+  e.target.classList.toggle('on', VIEW !== 'shaded');
+  document.getElementById('heatkey').style.display = VIEW === 'heat' ? '' : 'none';
   build();
   if (panes) {
     tA = makeGpuTimer(panes.A.gl, document.getElementById('fpsA'));
@@ -1102,12 +1138,6 @@ document.getElementById('diag').addEventListener('click', e => {
   e.target.classList.toggle('on', ACCUM_DIAG !== 0);
 });
 
-document.getElementById('ss').addEventListener('click', e => {
-  SS = SS === 1 ? 2 : SS === 2 ? 3 : SS === 3 ? 4 : 1;
-  e.target.textContent = 'SS: ' + (SS === 1 ? 'off' : SS + 'x' + SS);  // applies to BOTH panes
-  e.target.classList.toggle('on', SS !== 1);
-  resetStats();
-});
 
 document.getElementById('res').addEventListener('click', e => {
   RES = RES === 1 ? 0.5 : RES === 0.5 ? 2 : 1;
@@ -1137,6 +1167,88 @@ document.getElementById('panes').addEventListener('wheel', e => {
   cam.dist = Math.max(1.4, Math.min(40, cam.dist + e.deltaY * 0.004 * cam.dist));
   syncCam(); e.preventDefault();
 }, { passive: false });
+
+// ---- test cases ------------------------------------------------------------
+// Loading a case by hand off eight sliders is slow and easy to get subtly
+// wrong, and a case that is only approximately reproduced is worse than none -
+// it looks like a null result. So a case is text: "s=-0.79 minR=0.43 ..." for
+// any of the fractal params plus the three camera values. The same string works
+// as a URL query, so a case can be linked, and `copy current` emits the exact
+// state on screen.
+const CASE_KEYS = {
+  s: v => params.s = v, minR: v => params.minR = v,
+  fixR: v => params.fixR = v, fold: v => params.fold = v,
+  normK: v => params.normK = v,
+  specK: v => params.specK = v, normalCoef: v => params.normalCoef = v,
+  stepF: v => params.stepF = v, hitE: v => params.hitE = v,
+  dist: v => cam.dist = v, orbit: v => cam.orbit = v, height: v => cam.height = v,
+};
+
+function applyCase(text) {
+  // Accept "k=v" pairs separated by spaces, commas or &, so a pasted URL query
+  // and a pasted label both work without editing.
+  const pairs = String(text).replace(/^[?#]/, '').split(/[\s,&]+/).filter(Boolean);
+  const applied = [], unknown = [];
+  for (const pair of pairs) {
+    const m = /^([A-Za-z]+)=(-?[\d.]+)$/.exec(pair);
+    if (!m) { unknown.push(pair); continue; }
+    const [, k, raw] = m;
+    const v = parseFloat(raw);
+    if (!CASE_KEYS[k] || !isFinite(v)) { unknown.push(pair); continue; }
+    CASE_KEYS[k](v); applied.push(k);
+  }
+  if (applied.length) { syncSlidersFromState(); resetStats(); }
+  return { applied, unknown };
+}
+
+// Push current state back onto the sliders and their readouts. Without this the
+// sliders keep their old positions and the next drag snaps the value back.
+function syncSlidersFromState() {
+  const set = (id, v, digits) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.value = v;
+    const out = document.getElementById(id + 'V');
+    if (out) out.textContent = Number(v).toFixed(digits);
+  };
+  set('s', params.s, 2); set('minR', params.minR, 2);
+  set('fixR', params.fixR, 2); set('fold', params.fold, 2);
+  set('dist', cam.dist, 2); set('orbit', cam.orbit, 2); set('hgt', cam.height, 2);
+  set('stepF', params.stepF, 2);
+  set('hitE', params.hitE, 5);
+}
+
+function currentCase() {
+  return `s=${params.s} minR=${params.minR} fixR=${params.fixR} fold=${params.fold}`
+       + ` dist=${cam.dist} orbit=${cam.orbit} height=${cam.height}`;
+}
+
+{
+  const txt = document.getElementById('caseText');
+  const msg = document.getElementById('caseMsg');
+  const say = (t, ok) => { msg.textContent = t; msg.style.color = ok ? '#9f9' : '#ff8a8a'; };
+
+  document.getElementById('caseLoad').addEventListener('click', () => {
+    const r = applyCase(txt.value);
+    if (!r.applied.length) say('nothing loaded' + (r.unknown.length ? ': ' + r.unknown.join(' ') : ''), false);
+    else say('loaded ' + r.applied.join(' ') + (r.unknown.length ? '  (ignored: ' + r.unknown.join(' ') + ')' : ''), true);
+  });
+  txt.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('caseLoad').click(); });
+
+  document.getElementById('caseCopy').addEventListener('click', () => {
+    const c = currentCase();
+    txt.value = c;
+    const url = location.origin + location.pathname + '?' + c.replace(/ /g, '&');
+    navigator.clipboard?.writeText(url).then(
+      () => say('link copied', true),
+      () => say('copied to the box (clipboard blocked)', true));
+  });
+
+  // A case in the URL loads on open, so a link reproduces the exact view.
+  if (location.search.length > 1) {
+    const r = applyCase(decodeURIComponent(location.search));
+    if (r.applied.length) { txt.value = currentCase(); say('loaded from URL', true); }
+  }
+}
 </script>
 </body>
 </html>
