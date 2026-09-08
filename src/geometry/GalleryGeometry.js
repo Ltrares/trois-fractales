@@ -77,7 +77,7 @@ export const FRACTALS = {
         // on that and divides by the step factor. Undersizing it does not
         // degrade gracefully: rays expire a step or two short of a hit and the
         // sculpture goes porous and vanishes.
-        hitEpsilon: 0.001,
+        hitEpsilon: 0.002,
         stepFactor: 0.3,
     },
     mandelbulb: {
@@ -93,12 +93,17 @@ export const FRACTALS = {
         spotlightOffset: [-1.5, -1.5, 1.5],
     },
 };
-// maxSteps is DERIVED, never written by hand: it is a function of the epsilon
-// and the step factor, and hand-setting it is how the three drift apart.
 // Mandelbox only - the other two fractals are untouched and keep the shader's
 // built-in defaults.
-FRACTALS.mandelbox.maxSteps =
-    marchBudget(FRACTALS.mandelbox.hitEpsilon, FRACTALS.mandelbox.stepFactor);
+//
+// marchBudget(0.002, 0.3) would ask for 200 steps. This is pinned BELOW that on
+// purpose: 240 steps at eps 0.001 was too slow in the browser, and 100 is where
+// the frame time is acceptable. It is an undersized budget, and undersizing does
+// not degrade gracefully - rays expire a step or two short of a hit, so if
+// sculptures read porous or thin out at the far end of the gallery, this is the
+// first thing to raise. Restore the derived value with
+// marchBudget(FRACTALS.mandelbox.hitEpsilon, FRACTALS.mandelbox.stepFactor).
+FRACTALS.mandelbox.maxSteps = 100;
 
 
 // Derived spotlight positions
