@@ -114,6 +114,8 @@ const accumLocs = {
 const fxaaLocs = {
     texture: gl.getUniformLocation(fxaaProgram, 'u_texture'),
     textLayer: gl.getUniformLocation(fxaaProgram, 'u_textLayer'),
+    fractalMask: gl.getUniformLocation(fxaaProgram, 'u_fractalMask'),
+    galleryDepth: gl.getUniformLocation(fxaaProgram, 'u_galleryDepth'),
     resolution: gl.getUniformLocation(fxaaProgram, 'u_resolution'),
     fxaaOn: gl.getUniformLocation(fxaaProgram, 'u_fxaaOn')
 };
@@ -636,6 +638,16 @@ function render() {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, fboManager.galleryTextTex);
     gl.uniform1i(fxaaLocs.textLayer, 1);
+
+    // Depth-gate the text: the layer was written before any fractal existed, so
+    // these two say where a sculpture now stands in front of the wall.
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, fboManager.currentFrameMaskTex);
+    gl.uniform1i(fxaaLocs.fractalMask, 2);
+
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, fboManager.galleryDepthTex);
+    gl.uniform1i(fxaaLocs.galleryDepth, 3);
 
     gl.uniform2f(fxaaLocs.resolution, width, height);
     gl.uniform1i(fxaaLocs.fxaaOn, FXAA_ON ? 1 : 0);

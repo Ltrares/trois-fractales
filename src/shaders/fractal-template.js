@@ -3,7 +3,11 @@
 export const fractalShaderTemplate = `#version 300 es
 precision highp float;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+// Fractal coverage for the text composite: red holds this fragment's hit
+// distance, matching the 0-100 encoding the gallery uses for its own depth.
+// Zero means no fractal at this pixel.
+layout(location = 1) out vec4 fragMask;
 
 uniform vec2 u_resolution;
 uniform vec2 u_jitter;   // sub-pixel sample offset, in pixels (0,0 = centre)
@@ -232,6 +236,7 @@ void main() {
 
     col = pow(col, vec3(0.4545));
     fragColor = vec4(col, {{ALPHA_OUT}});
+    fragMask = vec4(t / 100.0, 0.0, 0.0, 1.0);
 }`;
 
 // Build fractal shaders from template
@@ -314,7 +319,7 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         .replace('{{NORMAL_EPSILON}}', opts.normalEpsilon
             || `${glslFloat(NORMAL_EPS_RATIO)} * (${hitEps})`)
         .replace('{{DEBUG_FLAT}}', opts.debugFlat
-            ? `fragColor = vec4(hit ? 1.0 : 0.0, float(stepsTaken) / stepBudget, 0.0, 1.0); return;`
+            ? `fragColor = vec4(hit ? 1.0 : 0.0, float(stepsTaken) / stepBudget, 0.0, 1.0); fragMask = vec4(0.0); return;`
             : '')
         // Ray-march heat map. Separates the two ways a ray can fail, which the
         // hit/miss view cannot: a ray that expired had too little budget, a ray
@@ -335,11 +340,12 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         } else {
             fragColor = vec4(0.0, 0.25 + 0.75 * frac, 0.0, 1.0);
         }
+        fragMask = vec4(0.0);
         return;
     }`
             : '')
         .replace('{{DEBUG_NORMALS}}', opts.debugNormals
-            ? `fragColor = vec4(nor * 0.5 + 0.5, ${opts.alphaOut || '1.0'}); return;`
+            ? `fragColor = vec4(nor * 0.5 + 0.5, ${opts.alphaOut || '1.0'}); fragMask = vec4(0.0); return;`
             : '')
         .replace('{{REFRESH_DE}}', refreshDE)
         .replace('{{RAY_MARCH_INIT}}', opts.init || '')
@@ -425,6 +431,7 @@ export const mandelboxShaderSrc = buildFractalShader(
             // the real surface -- a history fetch that swings ~0.8px every
             // frame with the camera parked.
             fragColor = vec4(gallery.rgb, {{ALPHA_MISS}});
+            fragMask = vec4(0.0);
             return;
         }`
     }

@@ -13,6 +13,10 @@ export class FBOManager {
         // Current frame buffer - the fractal passes render into this
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
+        // Fractal coverage: red channel holds the fractal's hit distance where
+        // a fractal was drawn, and 0 where it was not. The text composite reads
+        // it to decide whether a glyph is in front of the sculpture or behind.
+        this.currentFrameMaskTex = null;
 
         // TSAA history: ping-pong pair. accumFBO[i] renders into accumTex[i];
         // the pass reads the other one. RGBA8 like the rest of the chain --
@@ -61,6 +65,7 @@ export class FBOManager {
         if (this.galleryTextTex) gl.deleteTexture(this.galleryTextTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
+        if (this.currentFrameMaskTex) gl.deleteTexture(this.currentFrameMaskTex);
         for (let i = 0; i < 2; i++) {
             if (this.accumFBO[i]) gl.deleteFramebuffer(this.accumFBO[i]);
             if (this.accumTex[i]) gl.deleteTexture(this.accumTex[i]);
@@ -99,9 +104,12 @@ export class FBOManager {
 
         // Current frame buffer - fractal passes draw into this, FXAA reads it
         this.currentFrameTex = this.createColorTexture(width, height);
+        this.currentFrameMaskTex = this.createColorTexture(width, height);
         this.currentFrameFBO = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.currentFrameFBO);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.currentFrameTex, 0);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, this.currentFrameMaskTex, 0);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
 
         status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
         if (status !== gl.FRAMEBUFFER_COMPLETE) {
@@ -165,6 +173,7 @@ export class FBOManager {
         if (this.galleryDepthTex) gl.deleteTexture(this.galleryDepthTex);
         if (this.currentFrameFBO) gl.deleteFramebuffer(this.currentFrameFBO);
         if (this.currentFrameTex) gl.deleteTexture(this.currentFrameTex);
+        if (this.currentFrameMaskTex) gl.deleteTexture(this.currentFrameMaskTex);
         for (let i = 0; i < 2; i++) {
             if (this.accumFBO[i]) gl.deleteFramebuffer(this.accumFBO[i]);
             if (this.accumTex[i]) gl.deleteTexture(this.accumTex[i]);
@@ -180,6 +189,7 @@ export class FBOManager {
         this.galleryTextTex = null;
         this.currentFrameFBO = null;
         this.currentFrameTex = null;
+        this.currentFrameMaskTex = null;
         this.accumFBO = [null, null];
         this.accumTex = [null, null];
         this.accumReset = true;
