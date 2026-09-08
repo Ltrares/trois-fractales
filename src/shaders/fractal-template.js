@@ -18,7 +18,7 @@ uniform sampler2D u_galleryDepth;
 // Fractal-specific uniforms
 {{FRACTAL_UNIFORMS}}
 
-const int MAX_STEPS = 60;
+const int MAX_STEPS = {{MAX_STEPS}};
 const float MIN_DIST = 0.002;
 const float MAX_DIST = 100.0;
 
@@ -32,22 +32,6 @@ const float FRACTAL_SCALE = {{FRACTAL_SCALE}};
 float sdBox(vec3 p, vec3 b) {
     vec3 d = abs(p) - b;
     return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
-}
-
-// Half-angle subtended by one pixel, taken from the ray construction below:
-// uv is normalised by u_resolution.y and the forward term is 1.5 * u_zoom, so a
-// one-pixel step in uv turns the ray by 1/(res.y * 1.5 * zoom) radians. No FOV
-// constant needed - the projection is fully described by the uniforms.
-float pixelAngle() {
-    return 1.0 / (u_resolution.y * 1.5 * u_zoom);
-}
-
-// Radius of the pixel's cone at ray distance t: the footprint the sample stands
-// for. A surface detail finer than this cannot be resolved, so marching to a
-// tighter epsilon than this resolves DE noise rather than visible geometry -
-// which is what blinks as the camera moves.
-float pixelFootprint(float t) {
-    return t * pixelAngle();
 }
 
 // Ray-AABB intersection (returns tmin, tmax or -1 if no hit)
@@ -76,9 +60,15 @@ float sceneDE(vec3 p) {
 
 vec3 calcNormal(vec3 p, float t) {
     // Tetrahedron technique - 4 samples, more symmetric than forward differences.
-    // Sample width scales with ray distance: a fixed 0.001 offset is far finer
-    // than a pixel at range, so it resolves DE noise rather than visible surface.
     // Signs stay unit so only the sample width changes, not the weighting.
+    //
+    // The width must track the HIT EPSILON. The epsilon decides how fine a
+    // feature the march can land on; this width decides how fine a feature the
+    // shading can express. Probing wider than the epsilon averages the normal
+    // over detail the march just resolved, so tightening the epsilon alone
+    // makes detail DISAPPEAR rather than sharpen - measured on one sculpture,
+    // holding k at 0.001 while the epsilon fell 0.002 -> 0.0001 took roughness
+    // from 78 deg down, where tying k to the epsilon took it 9.9 -> 31.7 deg.
     float k = {{NORMAL_EPSILON}};
     const vec2 s = vec2(1.0, -1.0);
     return normalize(
@@ -148,13 +138,23 @@ void main() {
 
     // Ray march the fractal, starting from bbox entry
     float t = boxHit.x;
-    float tMax = min(boxHit.y, galleryDepth);
+    float tMax = {{TMAX_EXPR}};
     bool hit = false;
     int stepsTaken = 0;
+    // The denominator for "fraction of the march budget used". This is the
+    // RUNTIME budget, not the compiled ceiling: a variant that raises MAX_STEPS
+    // to allow short steps would otherwise divide by the ceiling and silently
+    // lose its fog, since stepsTaken never approaches it.
+    float stepBudget = {{STEP_BUDGET_EXPR}};
     float d = 0.0;
     {{RAY_MARCH_INIT}}
 
+    {{EXIT_REASON_DECL}}
     for (int i = 0; i < MAX_STEPS; i++) {
+        // A variant may cap the march below the compiled ceiling at runtime:
+        // GLSL needs a constant loop bound, so the ceiling is baked and the
+        // real budget is enforced by breaking out early.
+        {{STEP_BUDGET_BREAK}}
         stepsTaken = i;
         vec3 p = ro + rd * t;
         d = sceneDE(p);
@@ -162,10 +162,11 @@ void main() {
         if (d < {{HIT_EPSILON}}) {
             {{RAY_MARCH_HIT_CHECK}}
             hit = true;
+            {{EXIT_REASON_HIT}}
             break;
         }
-        t += d;
-        if (t > tMax) break;
+        t += d{{STEP_FACTOR}};
+        if (t > tMax) { {{EXIT_REASON_EXIT}}break; }
     }
 
     // Near-miss check: if we got close but exhausted steps, treat as hit
@@ -174,6 +175,7 @@ void main() {
     // Debug write happens before the miss path, so misses report their step
     // count instead of discarding.
     {{DEBUG_FLAT}}
+    {{DEBUG_HEAT}}
 
     if (!hit) {
         {{FOG_MISS}}
@@ -249,6 +251,14 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
     const refreshDE = opts.skipRefreshDE
         ? '// refresh skipped (no AO/shadow to overwrite globals)'
         : 'sceneDE(pos);';
+    // One source of truth for the surface threshold: the hit test and the
+    // normal sample width are both derived from it below.
+    const hitEps = opts.hitEpsilon || 'MIN_DIST';
+    // Historically the normal width was its own literal, 0.001, unrelated to
+    // MIN_DIST. Kept at half the epsilon so the shipped image is unchanged -
+    // 0.5 * 0.002 is the 0.001 it always was - while still being DERIVED, so
+    // the two cannot drift apart when either is changed.
+    const NORMAL_EPS_RATIO = 0.5;
     return fractalShaderTemplate
         .replace('{{FRACTAL_DE}}', fractalDE)
         .replace('{{FRACTAL_UNIFORMS}}', uniforms)
@@ -266,10 +276,67 @@ export function buildFractalShader(fractalDE, uniforms, displayPos, bboxSize, sc
         .replace('{{AO_STRENGTH}}', aoStrength)
         .replace('{{AMBIENT}}', ambient)
         .replace('{{DIFFUSE_CALC}}', diffuseCalc)
-        .replace('{{HIT_EPSILON}}', opts.hitEpsilon || 'MIN_DIST')
-        .replace('{{NORMAL_EPSILON}}', opts.normalEpsilon || '0.001')
+        // Exit-reason tracking exists only for the heat-map debug view. It is
+        // omitted entirely otherwise, so production shaders carry no trace of it.
+        .replace('{{EXIT_REASON_DECL}}', opts.debugHeat
+            ? `// How the march ended, for the heat map:
+    //   0 = hit, 1 = left the box (true miss), 2 = ran out of budget
+    int exitReason = 2;` : '')
+        .replace('{{EXIT_REASON_HIT}}', opts.debugHeat ? 'exitReason = 0;' : '')
+        .replace('{{EXIT_REASON_EXIT}}', opts.debugHeat ? 'exitReason = 1; ' : '')
+        .replace('{{MAX_STEPS}}', String(opts.maxSteps || 60))
+        .replace('{{STEP_BUDGET_EXPR}}', opts.stepBudget || `float(${opts.maxSteps || 60})`)
+        // Runtime step budget, e.g. an expression over a uniform. Used where the
+        // step length is itself adjustable: a shorter step needs proportionally
+        // more steps to cross the same distance, so the two move together rather
+        // than being two independent knobs.
+        .replace('{{STEP_BUDGET_BREAK}}', opts.stepBudget
+            ? `if (i >= int(${opts.stepBudget})) break;` : '')
+        .replace('{{TMAX_EXPR}}', opts.tMaxExpr || 'min(boxHit.y, galleryDepth)')
+        // Step-size safety factor. The mandelbox DE is not a strict lower bound
+        // on the distance to the surface, so a full-length step can jump past
+        // fine structure and land the ray beyond the real surface. A factor
+        // below 1 shortens every step. Accepts a number (baked in) or a GLSL
+        // expression such as a uniform name, so a harness can put it on a
+        // slider. Absent, steps stay full length.
+        .replace('{{STEP_FACTOR}}', (opts.stepFactor && opts.stepFactor !== 1.0)
+            ? ` * ${typeof opts.stepFactor === 'number' ? glslFloat(opts.stepFactor) : opts.stepFactor}`
+            : '')
+        .replace('{{HIT_EPSILON}}', hitEps)
+        // The normal sample width DEFAULTS TO THE HIT EPSILON rather than to a
+        // constant of its own. These two must stay matched - the epsilon sets
+        // how fine a feature the march lands on, this sets how fine a feature
+        // the shading can express - and as separate literals they silently
+        // drift apart: a tighter epsilon with an unchanged width averages the
+        // normal over detail the march just resolved, so detail DISAPPEARS
+        // instead of sharpening. Deriving it means changing one cannot
+        // desynchronise the other. Override only with a deliberate reason.
+        .replace('{{NORMAL_EPSILON}}', opts.normalEpsilon
+            || `${glslFloat(NORMAL_EPS_RATIO)} * (${hitEps})`)
         .replace('{{DEBUG_FLAT}}', opts.debugFlat
-            ? `fragColor = vec4(hit ? 1.0 : 0.0, float(stepsTaken) / float(MAX_STEPS), 0.0, 1.0); return;`
+            ? `fragColor = vec4(hit ? 1.0 : 0.0, float(stepsTaken) / stepBudget, 0.0, 1.0); return;`
+            : '')
+        // Ray-march heat map. Separates the two ways a ray can fail, which the
+        // hit/miss view cannot: a ray that expired had too little budget, a ray
+        // that exited found nothing there. They call for opposite fixes.
+        //   GREEN  = hit, brightness is fraction of the budget used
+        //   BLUE   = left the box - a true miss, empty space
+        //   RED    = EXPIRED, ran out of steps before reaching anything
+        //   YELLOW = hit, but only after using >90% of the budget (nearly expired)
+        .replace('{{DEBUG_HEAT}}', opts.debugHeat
+            ? `{
+        float frac = float(stepsTaken) / max(stepBudget, 1.0);
+        if (exitReason == 2) {
+            fragColor = vec4(1.0, 0.0, 0.0, 1.0);           // expired
+        } else if (exitReason == 1) {
+            fragColor = vec4(0.0, 0.15, 0.6, 1.0);          // clean miss
+        } else if (frac > 0.9) {
+            fragColor = vec4(1.0, 0.85, 0.0, 1.0);          // nearly expired
+        } else {
+            fragColor = vec4(0.0, 0.25 + 0.75 * frac, 0.0, 1.0);
+        }
+        return;
+    }`
             : '')
         .replace('{{DEBUG_NORMALS}}', opts.debugNormals
             ? `fragColor = vec4(nor * 0.5 + 0.5, ${opts.alphaOut || '1.0'}); return;`
@@ -307,13 +374,6 @@ function toGLSL(arr) {
     return arr.map(v => v.toFixed(1)).join(', ');
 }
 
-// Surface epsilon that grows with the pixel's cone footprint at range t.
-// coneK is in pixel footprints; 0 (or absent) keeps the fixed MIN_DIST.
-function coneEpsilon(coneK) {
-    if (!coneK) return 'MIN_DIST';
-    return `max(MIN_DIST, ${glslFloat(coneK)} * t / (u_resolution.y * 1.5 * u_zoom))`;
-}
-
 const mbx = FRACTALS.mandelbox;
 export const mandelboxShaderSrc = buildFractalShader(
     mandelboxDE, '',
@@ -328,24 +388,20 @@ export const mandelboxShaderSrc = buildFractalShader(
     {
         skipSelfShadow: false,
         skipAO: true,
-        // Cone-traced hit threshold: widen the surface epsilon with distance so
-        // a sample stands for the pixel footprint it actually covers.
-        //
-        // A fixed MIN_DIST resolves detail finer than a pixel can display, so
-        // whether a given micro-feature falls inside the epsilon flips as the
-        // camera moves and the pixel blinks - the distance sparkle. The pixel's
-        // half-angle comes from the ray construction below: uv is normalised by
-        // u_resolution.y and the forward term is 1.5 * u_zoom, so one pixel
-        // subtends 1/(res.y * 1.5 * zoom) radians, and its footprint at range t
-        // is t times that. RENDER_QUALITY scales u_resolution, so this follows
-        // the actual pixel size rather than a fixed assumption.
-        //
-        // max() keeps MIN_DIST near the sculpture, where a pixel is finer than
-        // 0.002 world units, so close-up detail is unchanged. The crossover at
-        // 1080p is around 3 units; the gallery viewing distance is about 7.
-        hitEpsilon: coneEpsilon(mbx.coneK),
+        // Surface epsilon and step factor come from FRACTALS.mandelbox, where
+        // the measurements behind them are recorded. The march previously took
+        // full-length DE steps against a fixed 0.002 epsilon, widened further
+        // with range by a pixel-cone term; that combination landed rays at
+        // inconsistent depths and produced normal noise rather than detail.
+        hitEpsilon: glslFloat(mbx.hitEpsilon),
+        stepFactor: mbx.stepFactor,
+        // Derived in GalleryGeometry from the two values above - a tighter
+        // epsilon and a shorter step both make rays take more steps, and a
+        // budget that does not follow them expires rays a step short of a hit,
+        // which reads as the sculpture going porous rather than as running out.
+        maxSteps: mbx.maxSteps,
         fogMiss: `// Fog: blend toward surface gray for rays that got lost
-        float fogAmount = float(stepsTaken) / float(MAX_STEPS);
+        float fogAmount = float(stepsTaken) / stepBudget;
         fogAmount = smoothstep(0.7, 1.0, fogAmount);
 
         // Only render fog if there's significant fog to show

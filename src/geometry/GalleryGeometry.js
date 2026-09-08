@@ -20,6 +20,15 @@ export function glslFloat(v) {
     return s.includes('.') || s.includes('e') ? s : s + '.0';
 }
 
+// Steps a ray needs, given how close it must get and how far it may move each
+// step. Both make the march longer, so neither can be changed without this.
+// 12 * (0.002/eps) is the measured worst case; 3x is margin, since that was one
+// sculpture at one angle. Floor of 60 keeps the loose end at what always shipped.
+export function marchBudget(hitEpsilon, stepFactor) {
+    const forEpsilon = Math.max(60, 36 * (0.002 / Math.max(hitEpsilon, 1e-5)));
+    return Math.min(2000, Math.ceil(forEpsilon / Math.max(stepFactor, 0.05)));
+}
+
 export const FRACTALS = {
     mandelbox: {
         position: [0.0, 1.8, -11.0],
@@ -38,11 +47,38 @@ export const FRACTALS = {
         scale: 0.35,
         // Spotlight offset from fractal center
         spotlightOffset: [-1.5, -1.5, 1.5],
-        // Cone-traced hit threshold, in pixel footprints. The surface epsilon
-        // widens with ray distance so a sample stands for the area it actually
-        // covers: 1.0 is one pixel of footprint, and 0 disables it, reverting to
-        // the fixed MIN_DIST at every range. See buildFractalShader.
-        coneK: 1.0,
+        // Surface epsilon, march step factor, and the step budget derived from
+        // them. All three are one system: change one and the others must follow.
+        //
+        // stepFactor - the mandelbox DE is not a valid lower bound on the
+        // distance to the surface (measured overestimates of 1.25x typical,
+        // 2.2x worst), so a full-length step can carry a ray through fine
+        // structure and out the far side. The DE returns an unsigned distance,
+        // so nothing downstream can tell that happened. Measured on
+        // s=-0.79 minR=0.43 fixR=1.10 fold=0.65 against a bisected surface, the
+        // mean change in NORMAL between adjacent rays - which is what shading
+        // shows - was 77 deg at full step where the true surface is 22 deg: the
+        // march was manufacturing detail, not resolving it. 0.3 brings it to
+        // 22 deg. Sculptures whose DE behaves are unaffected, so this costs
+        // budget rather than quality where it is not needed.
+        //
+        // hitEpsilon - how close counts as a surface. Tighter resolves finer
+        // structure, and this fractal has structure far below a pixel, so the
+        // limit is what a pixel can show rather than what the DE can find.
+        //
+        // maxSteps - NOT a free constant. A tighter epsilon makes rays thread
+        // finer structure before they can stop, and a shorter step covers less
+        // ground per step; both demand more steps. Worst-case steps to a hit,
+        // measured on the default sculpture at step 1.0:
+        //     eps 0.002 -> 1     eps 0.0002 -> 80
+        //     eps 0.001 -> 13    eps 0.0001 -> 205
+        //     eps 0.0005 -> 17   eps 0.00005 -> 485
+        // which is about 12 * (0.002 / eps). Budget below applies a 3x margin
+        // on that and divides by the step factor. Undersizing it does not
+        // degrade gracefully: rays expire a step or two short of a hit and the
+        // sculpture goes porous and vanishes.
+        hitEpsilon: 0.001,
+        stepFactor: 0.3,
     },
     mandelbulb: {
         position: [-11.0, 1.8, 0.0],
@@ -57,6 +93,13 @@ export const FRACTALS = {
         spotlightOffset: [-1.5, -1.5, 1.5],
     },
 };
+// maxSteps is DERIVED, never written by hand: it is a function of the epsilon
+// and the step factor, and hand-setting it is how the three drift apart.
+// Mandelbox only - the other two fractals are untouched and keep the shader's
+// built-in defaults.
+FRACTALS.mandelbox.maxSteps =
+    marchBudget(FRACTALS.mandelbox.hitEpsilon, FRACTALS.mandelbox.stepFactor);
+
 
 // Derived spotlight positions
 export const FRACTAL_SPOTLIGHTS = {
