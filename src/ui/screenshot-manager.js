@@ -41,12 +41,21 @@ export class ScreenshotManager {
             }
         }
 
-        // Save to localStorage
-        this._saveToStorage(entry);
+        // Save to the gallery; if it is full, hand the image straight to the
+        // user as a download so the capture is never lost.
+        const saved = this._saveToStorage(entry);
 
-        // Visual feedback - white flash + gallery hint
+        // The shot was taken either way, so always flash.
         this._showFlash();
-        this._showHint();
+
+        if (saved) {
+            this._showHint();
+            return;
+        }
+
+        this._handleDownload(entry);
+        showToast('Galerie pleine — image téléchargée. ' +
+            'Appuyez sur <kbd>G</kbd> pour faire de la place.');
     }
 
     _deepClone(obj) {
@@ -74,21 +83,15 @@ export class ScreenshotManager {
         hideToast();
     }
 
+    // Returns true if the entry was stored. Never evicts existing captures:
+    // when the gallery is full the caller falls back to a direct download.
     _saveToStorage(entry) {
         try {
             localStorage.setItem(STORAGE_PREFIX + entry.id, JSON.stringify(entry));
+            return true;
         } catch (e) {
             console.warn('Failed to save screenshot:', e);
-            // Could be quota exceeded - try removing oldest
-            const all = this._loadFromStorage();
-            if (all.length > 0) {
-                this._deleteFromStorage(all[0].id);
-                try {
-                    localStorage.setItem(STORAGE_PREFIX + entry.id, JSON.stringify(entry));
-                } catch (e2) {
-                    console.error('Still failed to save screenshot after cleanup:', e2);
-                }
-            }
+            return false;
         }
     }
 
