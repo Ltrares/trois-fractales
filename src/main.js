@@ -28,6 +28,9 @@ import { CameraController } from './camera/camera-controller.js';
 
 import { createSculptureAnimators, getFractalParams } from './fractals/fractal-animation.js';
 import { isFrozen, tickFreeze } from './ui/param-freeze.js';
+import { t, onLangChange } from './i18n/index.js';
+import { initDomTranslations } from './i18n/dom.js';
+import { initLangToggles } from './i18n/lang-toggle.js';
 import { sampleMandelboxCoverage, getLastScanResults } from './fractals/fractal-config.js';
 
 import { StatsDisplay } from './ui/stats-display.js';
@@ -130,8 +133,31 @@ const shadowBakeLocs = {
     maxV: gl.getUniformLocation(shadowBakeProgram, 'u_maxV')
 };
 
+// Translate the static DOM and wire the FR/EN toggles before anything is
+// drawn, so the first paint is already in the right language.
+initDomTranslations();
+initLangToggles();
+
 // Create textures
-const wallTexture = createWallTexture(gl);
+//
+// The wall texture is the one that carries prose, so it is the one that has to
+// be rebuilt when the language changes. It is a single 2048x1500 canvas redraw
+// plus an upload - the shadow bake does not sample it, so switching language
+// costs one texture, not an 18-layer re-bake.
+let wallTexture = createWallTexture(gl);
+onLangChange(() => {
+    gl.deleteTexture(wallTexture);
+    wallTexture = createWallTexture(gl);
+
+    // The toggle lives in the pause menu, and the render loop is stopped while
+    // paused - so without this the new wall text would not appear until the
+    // visitor resumed. render() re-queues itself only when unpaused, so this
+    // draws exactly one frame and stops.
+    if (cameraController && cameraController.isPaused) {
+        lastTime = performance.now();  // don't let the paused gap inflate dt
+        requestAnimationFrame(render);
+    }
+});
 const mandelboxCodeTexture = createCodeTexture(gl, mandelboxCodeString);
 const mandelbulbCodeTexture = createCodeTexture(gl, mandelbulbCodeString);
 const juliaCodeTexture = createCodeTexture(gl, juliaCodeString);
@@ -203,7 +229,8 @@ function beginShadowBake(onComplete) {
             }
             gl.deleteSync(fence);
 
-            startBtn.textContent = `Calcul des ombres... ${next}/${SHADOW_LAYERS}`;
+            startBtn.dataset.i18n = 'start.computing';
+            startBtn.textContent = t('start.computingProgress', { n: next, total: SHADOW_LAYERS });
 
             if (next < SHADOW_LAYERS) {
                 requestAnimationFrame(bakeOne);
@@ -678,7 +705,8 @@ function render() {
 // the bake, and now the bake is the thing that reports it is done.
 beginShadowBake(() => {
     startBtn.disabled = false;
-    startBtn.textContent = 'Entrez';
+    startBtn.dataset.i18n = 'start.enter';
+    startBtn.textContent = t('start.enter');
     render();
 });
 

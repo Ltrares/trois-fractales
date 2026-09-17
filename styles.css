@@ -83,6 +83,56 @@ canvas { display: block; }
     font-size: 12px;
 }
 
+/* Language toggle - appears in both the start overlay and the pause menu.
+   The active language is the bright one; the other is a button. */
+.lang-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+#overlay .lang-toggle {
+    margin-top: 30px;
+    margin-bottom: 0;
+}
+.lang-toggle .lang-option {
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: #666;
+    cursor: pointer;
+}
+.lang-toggle .lang-option:hover {
+    color: #aaa;
+}
+.lang-toggle .lang-option.active {
+    color: #fff;
+    cursor: default;
+}
+.lang-toggle .lang-sep {
+    color: #444;
+    font-size: 12px;
+}
+/* The start overlay styles all its buttons as big white blocks; the toggle
+   is not that kind of button. */
+#overlay .lang-toggle .lang-option {
+    background: none;
+    color: #666;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+#overlay .lang-toggle .lang-option:hover:not(:disabled) {
+    background: none;
+    color: #aaa;
+}
+#overlay .lang-toggle .lang-option.active {
+    color: #fff;
+}
+
 /* Screenshot overlay */
 #screenshot-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -133,8 +183,10 @@ canvas { display: block; }
     gap: 20px;
     margin-bottom: 30px;
 }
+/* Text comes from the data-empty attribute so it can be translated - CSS
+   string literals are not reachable from the language toggle. */
 #screenshot-grid:empty::after {
-    content: 'Aucune capture. Appuyez sur T pour capturer.';
+    content: attr(data-empty);
     color: #666;
     grid-column: 1 / -1;
     padding: 60px;

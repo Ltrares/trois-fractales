@@ -12,40 +12,52 @@
 </head>
 <body>
     <div id="overlay">
-        <h1>Trois Fractales</h1>
-        <button id="startBtn" disabled>Calcul des ombres...</button>
-        <div class="hint" id="controlsHint">WASD déplacer | Souris regarder | Z zoom | C s'accroupir | R aléatoire | ESC quitter</div>
+        <h1 data-i18n="app.title">Trois Fractales</h1>
+        <button id="startBtn" disabled data-i18n="start.computing">Calcul des ombres...</button>
+        <!-- data-i18n is set to the touch variant below before the table is
+             applied, so a phone gets the right hint on the first paint. -->
+        <div class="hint" id="controlsHint" data-i18n="hint.desktop">WASD déplacer | Souris regarder | Z zoom | C s'accroupir | R aléatoire | ESC quitter</div>
         <script>
             if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
-                document.getElementById('controlsHint').textContent = 'Toucher et glisser pour se déplacer et regarder';
+                document.getElementById('controlsHint').dataset.i18n = 'hint.touch';
             }
         </script>
-        <div class="warning">⚠️ Avertissement : ce contenu peut provoquer des crises chez les personnes épileptiques photosensibles.</div>
+        <div class="lang-toggle" id="overlay-lang">
+            <button type="button" class="lang-option" data-lang="fr">FR</button>
+            <span class="lang-sep">·</span>
+            <button type="button" class="lang-option" data-lang="en">EN</button>
+        </div>
+        <div class="warning" data-i18n="warning.epilepsy">⚠️ Avertissement : ce contenu peut provoquer des crises chez les personnes épileptiques photosensibles.</div>
     </div>
 
     <div id="pause-overlay" class="hidden">
         <div class="pause-content">
-            <h2>Pause</h2>
+            <h2 data-i18n="pause.title">Pause</h2>
             <div class="controls">
-                <div class="control-row"><span class="key">WASD</span> Déplacer</div>
-                <div class="control-row"><span class="key">Souris</span> Regarder</div>
-                <div class="control-row"><span class="key">Z</span> Zoom (maintenir)</div>
-                <div class="control-row"><span class="key">C</span> S'accroupir (maintenir)</div>
-                <div class="control-row"><span class="key">R</span> Fractales aléatoires</div>
-                <div class="control-row"><span class="key">T</span> Capture d'écran</div>
-                <div class="control-row"><span class="key">P</span> Figer les paramètres (30 s)</div>
-                <div class="control-row"><span class="key">O</span> Libérer les paramètres</div>
-                <div class="control-row"><span class="key">G</span> Galerie</div>
+                <div class="control-row"><span class="key">WASD</span> <span data-i18n="pause.move">Déplacer</span></div>
+                <div class="control-row"><span class="key" data-i18n="pause.mouseKey">Souris</span> <span data-i18n="pause.look">Regarder</span></div>
+                <div class="control-row"><span class="key">Z</span> <span data-i18n="pause.zoom">Zoom (maintenir)</span></div>
+                <div class="control-row"><span class="key">C</span> <span data-i18n="pause.crouch">S'accroupir (maintenir)</span></div>
+                <div class="control-row"><span class="key">R</span> <span data-i18n="pause.random">Fractales aléatoires</span></div>
+                <div class="control-row"><span class="key">T</span> <span data-i18n="pause.screenshot">Capture d'écran</span></div>
+                <div class="control-row"><span class="key">P</span> <span data-i18n="pause.freeze">Figer les paramètres (30 s)</span></div>
+                <div class="control-row"><span class="key">O</span> <span data-i18n="pause.release">Libérer les paramètres</span></div>
+                <div class="control-row"><span class="key">G</span> <span data-i18n="pause.gallery">Galerie</span></div>
             </div>
-            <div class="resume-hint">ESPACE ou cliquer pour reprendre</div>
+            <div class="lang-toggle" id="pause-lang">
+                <button type="button" class="lang-option" data-lang="fr">FR</button>
+                <span class="lang-sep">·</span>
+                <button type="button" class="lang-option" data-lang="en">EN</button>
+            </div>
+            <div class="resume-hint" data-i18n="pause.resume">ESPACE ou cliquer pour reprendre</div>
         </div>
     </div>
 
     <div id="screenshot-overlay" class="hidden">
         <div class="screenshot-content">
-            <h2>Captures d'écran</h2>
+            <h2 data-i18n="gallery.title">Captures d'écran</h2>
             <div id="screenshot-grid"></div>
-            <div class="screenshot-hint">Cliquer pour agrandir | ↓ pour télécharger | Suppr pour effacer | <span class="key">G</span> ou <span class="key">ESC</span> pour fermer</div>
+            <div class="screenshot-hint" data-i18n-html="gallery.hint">Cliquer pour agrandir | ↓ pour télécharger | Suppr pour effacer | <span class="key">G</span> ou <span class="key">ESC</span> pour fermer</div>
         </div>
     </div>
 

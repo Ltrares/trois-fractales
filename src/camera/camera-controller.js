@@ -4,8 +4,8 @@ import { MOVE_SPEED, RUN_MULTIPLIER, MOUSE_SENS, STAND_HEIGHT, CROUCH_HEIGHT, CR
 import { isValidPosition } from './collision.js';
 import { showToast } from '../ui/toast.js';
 import { extendFreeze, cutFreezeShort, clearFreeze } from '../ui/param-freeze.js';
+import { t } from '../i18n/index.js';
 
-const CURSOR_HINT = 'Appuyez sur <kbd>\u00c9CHAP</kbd> pour lib\u00e9rer le curseur';
 const CURSOR_HINT_MS = 6000;
 
 export class CameraController {
@@ -199,7 +199,7 @@ export class CameraController {
 
         this._cursorHintTimer = setTimeout(() => {
             this._cursorHintTimed = true;
-            showToast(CURSOR_HINT, CURSOR_HINT_MS);
+            showToast(t('toast.cursorHint'), CURSOR_HINT_MS);
         }, 4000);
     }
 
@@ -227,7 +227,7 @@ export class CameraController {
                 now - this._lastShakeHint > COOLDOWN_MS) {
                 this._lastShakeHint = now;
                 this._shakeTimes.length = 0;
-                showToast(CURSOR_HINT, CURSOR_HINT_MS);
+                showToast(t('toast.cursorHint'), CURSOR_HINT_MS);
             }
         }
         this._shakeDir = dir;

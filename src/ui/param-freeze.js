@@ -1,4 +1,5 @@
 import { showToast } from './toast.js';
+import { t } from '../i18n/index.js';
 
 // Temporarily freezes fractal parameter animation so a still shot can be framed.
 //
@@ -33,7 +34,7 @@ export function tickFreeze(dt) {
  */
 export function extendFreeze(duration = FREEZE_S) {
     remaining = duration;
-    showToast(`Paramètres figés — ${Math.ceil(duration)} s`, TOAST_MS);
+    showToast(t('toast.frozen', { n: Math.ceil(duration) }), TOAST_MS);
 }
 
 export function isFrozen() {

@@ -1,5 +1,7 @@
 // Title wall texture generation
 
+import { t } from '../i18n/index.js';
+
 // Word wrap helper
 function wrapText(ctx, text, maxWidth) {
     const words = text.split(' ');
@@ -32,12 +34,12 @@ export function createWallTexture(gl) {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#000000';
     ctx.font = '600 72px Georgia, serif';
-    ctx.fillText('TROIS FRACTALES', 1024, 80);
+    ctx.fillText(t('wall.title'), 1024, 80);
 
     // Subtitle
     ctx.fillStyle = '#000000';
     ctx.font = 'italic 32px Georgia, serif';
-    ctx.fillText('et Leurs Ombres Peintes', 1024, 145);
+    ctx.fillText(t('wall.subtitle'), 1024, 145);
 
     // === SCULPTURE INFO BOXES ===
     const boxWidth = 500;
@@ -45,23 +47,23 @@ export function createWallTexture(gl) {
 
     const sculptures = [
         {
-            title: 'MANDELBULB',
-            subtitle: 'Galerie Ouest',
-            desc: "Cette formule, créée en 2009, est une extension tridimensionnelle de l'ensemble de Mandelbrot. Elle produit des formes qui ressemblent au chou romanesco.",
+            title: t('wall.mandelbulb.title'),
+            subtitle: t('wall.mandelbulb.location'),
+            desc: t('wall.mandelbulb.desc'),
             x: 300,
             y: 300
         },
         {
-            title: 'MANDELBOX',
-            subtitle: 'Galerie Sud',
-            desc: "Cette formule, découverte en 2010, ressemble à un labyrinthe de structures extraterrestres et peut se réduire à un seul point.",
+            title: t('wall.mandelbox.title'),
+            subtitle: t('wall.mandelbox.location'),
+            desc: t('wall.mandelbox.desc'),
             x: 790,
             y: 670
         },
         {
-            title: 'JULIA TRANCHE',
-            subtitle: 'Galerie Est',
-            desc: "L'ensemble de Gaston Julia, découvert en 1918, est ici étendu à quatre dimensions. On coupe l'espace 4D pour créer une tranche 3D de tubes faits de fractales 2D.",
+            title: t('wall.julia.title'),
+            subtitle: t('wall.julia.location'),
+            desc: t('wall.julia.desc'),
             x: 1250,
             y: 300
         }
@@ -110,7 +112,7 @@ export function createWallTexture(gl) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#000000';
     ctx.font = '26px Georgia, serif';
-    const generalDesc = "Les fractales sont des formes définies par des formules mathématiques répétées. Ces formules génèrent plus de détails à chaque échelle. Les surfaces que vous voyez sont les frontières de ces formules. Pour afficher en temps réel, on impose des limites à la complexité et à la qualité visuelle.";
+    const generalDesc = t('wall.general');
     const generalLines = wrapText(ctx, generalDesc, 1200);
     let generalY = 1140;
 
@@ -123,7 +125,7 @@ export function createWallTexture(gl) {
     // Note: No period after P - the peephole easter egg serves as the period
     ctx.textAlign = 'right';
     ctx.font = 'italic 72px Georgia, serif';
-    ctx.fillText('— P  Fluff', 1600, 1390);
+    ctx.fillText(t('wall.signature'), 1600, 1390);
 
     // Create WebGL texture
     const texture = gl.createTexture();

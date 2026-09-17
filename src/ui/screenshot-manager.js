@@ -1,6 +1,7 @@
 // Screenshot capture and gallery management
 
 import { showToast, hideToast } from './toast.js';
+import { t, tn, onLangChange } from '../i18n/index.js';
 
 const STORAGE_PREFIX = 'fractal-screenshot-';
 
@@ -14,6 +15,19 @@ export class ScreenshotManager {
         this.selectedId = null;
 
         this._boundKeyDown = this._handleKeyDown.bind(this);
+
+        // The empty-state text lives in a CSS ::after, which can only read an
+        // attribute - so it is set here rather than in the stylesheet.
+        this._applyLang();
+        onLangChange(() => this._applyLang());
+    }
+
+    _applyLang() {
+        this.grid.dataset.empty = t('gallery.empty');
+        // Item captions and the storage line are built imperatively, so they
+        // only pick up a new language on redraw. Redraw if we are on screen;
+        // otherwise opening the gallery will rebuild them anyway.
+        if (this.visible) this._renderGrid();
     }
 
     capture(camera, sculptureAnimators) {
@@ -54,8 +68,7 @@ export class ScreenshotManager {
         }
 
         this._handleDownload(entry);
-        showToast('Galerie pleine — image téléchargée. ' +
-            'Appuyez sur <kbd>G</kbd> pour faire de la place.');
+        showToast(t('toast.galleryFull'));
     }
 
     _deepClone(obj) {
@@ -76,7 +89,7 @@ export class ScreenshotManager {
     }
 
     _showHint() {
-        showToast('Appuyez sur <kbd>G</kbd> pour ouvrir la galerie');
+        showToast(t('toast.galleryHint'));
     }
 
     _hideHint() {
@@ -185,7 +198,7 @@ export class ScreenshotManager {
 
         const info = document.createElement('div');
         info.className = 'storage-info';
-        info.innerHTML = `${count} capture${count !== 1 ? 's' : ''} · ${this._formatBytes(used)} / ${this._formatBytes(quota)} ` +
+        info.innerHTML = `${tn('gallery.count', count)} · ${this._formatBytes(used)} / ${this._formatBytes(quota)} ` +
             `<span class="storage-bar"><span class="storage-bar-fill" style="width: ${pct}%"></span></span>`;
 
         // Insert after the h2
@@ -207,7 +220,7 @@ export class ScreenshotManager {
 
             const img = document.createElement('img');
             img.src = entry.imageData;
-            img.alt = 'Screenshot';
+            img.alt = t('gallery.imageAlt');
 
             const meta = document.createElement('div');
             meta.className = 'meta';
@@ -238,7 +251,7 @@ export class ScreenshotManager {
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'download-btn';
             downloadBtn.textContent = '\u2193';
-            downloadBtn.title = 'Télécharger';
+            downloadBtn.title = t('gallery.download');
             downloadBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this._handleDownload(entry);
