@@ -14,7 +14,6 @@ An interactive 3D WebGL sandbox designed for real-time fractal exploration and v
 * **Generative Randomization:** Instantly generate new fractal equations, color palettes, and structural parameters on the fly.
 * **Interactive Tooling:** Freeze and lock parameters, capture high-resolution screenshots, and manage an in-app gallery.
 * **Bilingual Interface:** French and English, switchable live via the **FR · EN** toggle on the start and pause screens. Defaults to French.
-* **Touch Support:** Drag to look, touch to walk forward on phones and tablets.
 
 ---
 
