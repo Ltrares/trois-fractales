@@ -75,15 +75,6 @@ export function createWallTexture(gl) {
         const textX = boxX + boxPadding;
         const textWidth = boxWidth - boxPadding * 2;
 
-        // Box background (subtle)
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.0)';
-        ctx.fillRect(boxX, boxY, boxWidth, 380);
-
-        // Box border
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(boxX, boxY, boxWidth, 380);
-
         // Title
         ctx.textAlign = 'left';
         ctx.fillStyle = '#000000';
