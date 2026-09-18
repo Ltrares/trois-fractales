@@ -83,6 +83,25 @@ canvas { display: block; }
     font-size: 12px;
 }
 
+/* Repo link - pause menu only, kept in the same muted register as the
+   resume hint so it never competes with the controls above it. */
+#pause-overlay .repo-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 16px;
+    color: #666;
+    font-size: 12px;
+    text-decoration: none;
+}
+#pause-overlay .repo-link:hover {
+    color: #aaa;
+}
+#pause-overlay .repo-icon {
+    display: block;
+}
+
 /* Language toggle - appears in both the start overlay and the pause menu.
    The active language is the bright one; the other is a button. */
 .lang-toggle {

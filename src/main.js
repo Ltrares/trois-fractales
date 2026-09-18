@@ -31,6 +31,7 @@ import { isFrozen, tickFreeze } from './ui/param-freeze.js';
 import { t, onLangChange } from './i18n/index.js';
 import { initDomTranslations } from './i18n/dom.js';
 import { initLangToggles } from './i18n/lang-toggle.js';
+import { initRepoLink } from './ui/repo-link.js';
 import { sampleMandelboxCoverage, getLastScanResults } from './fractals/fractal-config.js';
 
 import { StatsDisplay } from './ui/stats-display.js';
@@ -137,6 +138,7 @@ const shadowBakeLocs = {
 // drawn, so the first paint is already in the right language.
 initDomTranslations();
 initLangToggles();
+initRepoLink();
 
 // Create textures
 //

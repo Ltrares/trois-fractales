@@ -33,6 +33,7 @@ export const STRINGS = {
         'pause.freeze': 'Figer les paramètres (30 s)',
         'pause.release': 'Libérer les paramètres',
         'pause.gallery': 'Galerie',
+        'pause.source': 'Code source',
         'pause.resume': 'ESPACE ou cliquer pour reprendre',
 
         // Screenshot gallery
@@ -87,6 +88,7 @@ export const STRINGS = {
         'pause.freeze': 'Freeze parameters (30 s)',
         'pause.release': 'Release parameters',
         'pause.gallery': 'Gallery',
+        'pause.source': 'Source',
         'pause.resume': 'SPACE or click to resume',
 
         'gallery.title': 'Screenshots',
